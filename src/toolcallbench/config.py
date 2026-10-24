@@ -82,8 +82,16 @@ def load_config(path: Path) -> RunConfig:
     return cfg
 
 
+def data_dir() -> Path:
+    """The tasks, fixture repository and example configs that ship inside the installed package."""
+    return Path(__file__).resolve().parent / "data"
+
+
 def find_project_root(start: Path | None = None) -> Path:
-    """Walk up from `start` (default: the current directory) to a folder holding tasks/ and fixtures/repo/."""
+    """Walk up from `start` (default: the current directory) to a folder holding tasks/ and fixtures/repo/.
+
+    Returns `start` itself when there is none; the caller then falls back to the built-in data.
+    """
     start = Path(start or Path.cwd()).resolve()
     for candidate in [start, *start.parents]:
         if (candidate / "tasks").is_dir() and (candidate / "fixtures" / "repo").is_dir():

@@ -10,7 +10,7 @@ make test
 
 ## Add a task
 
-1. Copy a file in `tasks/` and change the id (`group-NN`).
+1. Copy a file in `src/toolcallbench/data/tasks/` and change the id (`group-NN`).
 2. Write the prompt, the `expect` block and a `reference` solution.
 3. `toolcallbench validate-tasks --tasks your-id` must pass.
 4. `python scripts/make_task_catalog.py` to refresh `docs/TASK_CATALOG.md`.

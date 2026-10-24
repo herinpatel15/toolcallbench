@@ -122,3 +122,19 @@ def test_three_backend_errors_in_a_row_stop_a_model(tmp_path, monkeypatch, capsy
     db = sqlite3.connect(res / "results.sqlite")
     assert db.execute("select count(*), min(status), max(status) from runs").fetchone() == (3, "error", "error")
     assert db.execute("select count(*) from runs where passed = 1").fetchone()[0] == 0
+
+
+def test_init_creates_configs_and_refuses_overwrite(tmp_path, capsys):
+    assert cli("init", str(tmp_path)) == 0
+    assert (tmp_path / "configs" / "my-models.yaml").is_file()
+    assert not (tmp_path / "tasks").exists()
+    assert cli("init", str(tmp_path)) == 1
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_init_with_tasks_gives_a_folder_that_runs(tmp_path, capsys, monkeypatch):
+    assert cli("init", str(tmp_path), "--with-tasks") == 0
+    assert (tmp_path / "fixtures" / "repo" / "pytest.ini").is_file()
+    monkeypatch.chdir(tmp_path)
+    assert cli("validate-tasks") == 0
+    assert "20/20 reference solutions pass" in capsys.readouterr().out

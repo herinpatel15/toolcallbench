@@ -35,11 +35,11 @@ def collect_files() -> list[str]:
     for name in ("pyproject.toml", ".gitignore", "Makefile", "README.md", ".github/workflows/ci.yml"):
         if (ROOT / name).is_file():
             found.add(name)
-    for folder, pattern in (("src", "*.py"), ("tests", "*.py"), ("tasks", "*.yaml"), ("configs", "*.yaml"), ("scripts", "*")):
+    for folder, pattern in (("src", "*.py"), ("tests", "*.py"), ("scripts", "*")):
         for path in (ROOT / folder).rglob(pattern):
             if path.is_file() and not SKIP_PARTS & set(path.relative_to(ROOT).parts) and "egg-info" not in str(path):
                 found.add(path.relative_to(ROOT).as_posix())
-    for path in (ROOT / "fixtures" / "repo").rglob("*"):
+    for path in (ROOT / "src" / "toolcallbench" / "data").rglob("*"):
         if path.is_file() and not SKIP_PARTS & set(path.relative_to(ROOT).parts):
             found.add(path.relative_to(ROOT).as_posix())
     return sorted(found)

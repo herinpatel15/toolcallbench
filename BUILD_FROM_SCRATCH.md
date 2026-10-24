@@ -55,26 +55,6 @@ create missing folders as you go.
 .gitignore
 Makefile
 README.md
-configs/m4-16gb.yaml
-configs/quant-sweep-qwen3-8b.yaml
-configs/smoke-scripted.yaml
-fixtures/repo/README.md
-fixtures/repo/config/settings.json
-fixtures/repo/data/books.csv
-fixtures/repo/data/members.csv
-fixtures/repo/pytest.ini
-fixtures/repo/scripts/report.py
-fixtures/repo/src/shelf/__init__.py
-fixtures/repo/src/shelf/catalog.py
-fixtures/repo/src/shelf/fees.py
-fixtures/repo/src/shelf/loans.py
-fixtures/repo/src/shelf/models.py
-fixtures/repo/src/shelf/settings.py
-fixtures/repo/src/shelf/utils.py
-fixtures/repo/tests/test_catalog.py
-fixtures/repo/tests/test_fees.py
-fixtures/repo/tests/test_loans.py
-fixtures/repo/tests/test_utils.py
 pyproject.toml
 scripts/estimate_memory.py
 scripts/make_build_guide.py
@@ -91,6 +71,47 @@ src/toolcallbench/backends/scripted.py
 src/toolcallbench/checks.py
 src/toolcallbench/cli.py
 src/toolcallbench/config.py
+src/toolcallbench/data/configs/m4-16gb.yaml
+src/toolcallbench/data/configs/my-models.yaml
+src/toolcallbench/data/configs/quant-sweep-qwen3-8b.yaml
+src/toolcallbench/data/configs/smoke-scripted.yaml
+src/toolcallbench/data/fixtures/repo/README.md
+src/toolcallbench/data/fixtures/repo/config/settings.json
+src/toolcallbench/data/fixtures/repo/data/books.csv
+src/toolcallbench/data/fixtures/repo/data/members.csv
+src/toolcallbench/data/fixtures/repo/pytest.ini
+src/toolcallbench/data/fixtures/repo/scripts/report.py
+src/toolcallbench/data/fixtures/repo/src/shelf/__init__.py
+src/toolcallbench/data/fixtures/repo/src/shelf/catalog.py
+src/toolcallbench/data/fixtures/repo/src/shelf/fees.py
+src/toolcallbench/data/fixtures/repo/src/shelf/loans.py
+src/toolcallbench/data/fixtures/repo/src/shelf/models.py
+src/toolcallbench/data/fixtures/repo/src/shelf/settings.py
+src/toolcallbench/data/fixtures/repo/src/shelf/utils.py
+src/toolcallbench/data/fixtures/repo/tests/test_catalog.py
+src/toolcallbench/data/fixtures/repo/tests/test_fees.py
+src/toolcallbench/data/fixtures/repo/tests/test_loans.py
+src/toolcallbench/data/fixtures/repo/tests/test_utils.py
+src/toolcallbench/data/tasks/chain-01.yaml
+src/toolcallbench/data/tasks/chain-02.yaml
+src/toolcallbench/data/tasks/chain-03.yaml
+src/toolcallbench/data/tasks/chain-04.yaml
+src/toolcallbench/data/tasks/edit-01.yaml
+src/toolcallbench/data/tasks/edit-02.yaml
+src/toolcallbench/data/tasks/edit-03.yaml
+src/toolcallbench/data/tasks/edit-04.yaml
+src/toolcallbench/data/tasks/edit-05.yaml
+src/toolcallbench/data/tasks/failure-01.yaml
+src/toolcallbench/data/tasks/failure-02.yaml
+src/toolcallbench/data/tasks/failure-03.yaml
+src/toolcallbench/data/tasks/read-01.yaml
+src/toolcallbench/data/tasks/read-02.yaml
+src/toolcallbench/data/tasks/read-03.yaml
+src/toolcallbench/data/tasks/read-04.yaml
+src/toolcallbench/data/tasks/read-05.yaml
+src/toolcallbench/data/tasks/run-01.yaml
+src/toolcallbench/data/tasks/run-02.yaml
+src/toolcallbench/data/tasks/run-03.yaml
 src/toolcallbench/models.py
 src/toolcallbench/patching.py
 src/toolcallbench/report.py
@@ -98,26 +119,6 @@ src/toolcallbench/runner.py
 src/toolcallbench/store.py
 src/toolcallbench/tasks.py
 src/toolcallbench/tools.py
-tasks/chain-01.yaml
-tasks/chain-02.yaml
-tasks/chain-03.yaml
-tasks/chain-04.yaml
-tasks/edit-01.yaml
-tasks/edit-02.yaml
-tasks/edit-03.yaml
-tasks/edit-04.yaml
-tasks/edit-05.yaml
-tasks/failure-01.yaml
-tasks/failure-02.yaml
-tasks/failure-03.yaml
-tasks/read-01.yaml
-tasks/read-02.yaml
-tasks/read-03.yaml
-tasks/read-04.yaml
-tasks/read-05.yaml
-tasks/run-01.yaml
-tasks/run-02.yaml
-tasks/run-03.yaml
 tests/conftest.py
 tests/mock_servers.py
 tests/test_checks.py
@@ -165,7 +166,7 @@ git init
 python3 -m venv .venv
 source .venv/bin/activate        # run this again in every new terminal
 touch README.md                  # a real README comes on Day 9
-mkdir -p src/toolcallbench tests tasks configs scripts fixtures/repo
+mkdir -p src/toolcallbench/data/tasks src/toolcallbench/data/configs src/toolcallbench/data/fixtures/repo tests scripts
 ```
 
 ### Create
@@ -183,15 +184,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "toolcallbench"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Benchmark how reliably local LLMs call tools on your own repo and hardware"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["pyyaml>=6", "jsonschema>=4"]
+keywords = ["llm", "benchmark", "tool-calling", "ollama", "function-calling"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "pyyaml>=6",
+    "jsonschema>=4",
+    "pytest>=7",  # the benchmark's fixture repository is checked by running its tests
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "build", "twine"]
 
 [project.scripts]
 toolcallbench = "toolcallbench.cli:main"
@@ -199,9 +213,15 @@ toolcallbench = "toolcallbench.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.dynamic]
+version = { attr = "toolcallbench.__version__" }
+
+[tool.setuptools.package-data]
+toolcallbench = ["data/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["fixtures", ".git", "results"]
+norecursedirs = ["fixtures", "data", ".git", "results"]
 addopts = "-q"
 ```
 
@@ -234,7 +254,7 @@ The package files. `__init__.py` holds the version; `__main__.py` lets you run
 ```python
 """ToolCallBench: measure how reliably local LLMs call tools on your own repo and hardware."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 ```
 
 <!-- file: src/toolcallbench/__main__.py -->
@@ -263,7 +283,7 @@ python -c "import toolcallbench; print(toolcallbench.__version__)"
 
 ```text
 $ python -c "import toolcallbench; print(toolcallbench.__version__)"
-0.1.0
+1.0.0
 ```
 
 ### Checkpoint
@@ -282,7 +302,7 @@ git add -A && git commit -m "Day 0: project skeleton"
 
 A benchmark needs something to work on. We want a small project that is realistic (code,
 config, data, tests) and has known bugs, so we can ask a model to "fix the failing tests" and
-check the answer with code. It lives in `fixtures/repo`. For every run, the program copies it
+check the answer with code. It lives in `src/toolcallbench/data/fixtures/repo`. For every run, the program copies it
 to a temporary folder, so the model can never break the original.
 
 The two bugs are on purpose:
@@ -296,8 +316,8 @@ Do not fix them. The tasks need them.
 
 Settings and data:
 
-<!-- file: fixtures/repo/config/settings.json -->
-**`fixtures/repo/config/settings.json`**
+<!-- file: src/toolcallbench/data/fixtures/repo/config/settings.json -->
+**`src/toolcallbench/data/fixtures/repo/config/settings.json`**
 
 ```json
 {
@@ -309,8 +329,8 @@ Settings and data:
 }
 ```
 
-<!-- file: fixtures/repo/data/books.csv -->
-**`fixtures/repo/data/books.csv`**
+<!-- file: src/toolcallbench/data/fixtures/repo/data/books.csv -->
+**`src/toolcallbench/data/fixtures/repo/data/books.csv`**
 
 ```text
 isbn,title,author,year,copies
@@ -322,8 +342,8 @@ isbn,title,author,year,copies
 9780743273565,The Great Gatsby,F. Scott Fitzgerald,1925,2
 ```
 
-<!-- file: fixtures/repo/data/members.csv -->
-**`fixtures/repo/data/members.csv`**
+<!-- file: src/toolcallbench/data/fixtures/repo/data/members.csv -->
+**`src/toolcallbench/data/fixtures/repo/data/members.csv`**
 
 ```text
 member_id,name,joined
@@ -334,8 +354,8 @@ M003,Chen Wei,2023-01-20
 
 The package. Read `catalog.py` and `fees.py` and find the two bugs.
 
-<!-- file: fixtures/repo/src/shelf/__init__.py -->
-**`fixtures/repo/src/shelf/__init__.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/src/shelf/__init__.py -->
+**`src/toolcallbench/data/fixtures/repo/src/shelf/__init__.py`**
 
 ```python
 """A tiny library-lending package used as a benchmark fixture."""
@@ -343,8 +363,8 @@ The package. Read `catalog.py` and `fees.py` and find the two bugs.
 __version__ = "0.3.0"
 ```
 
-<!-- file: fixtures/repo/src/shelf/models.py -->
-**`fixtures/repo/src/shelf/models.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/src/shelf/models.py -->
+**`src/toolcallbench/data/fixtures/repo/src/shelf/models.py`**
 
 ```python
 """Plain data classes."""
@@ -379,8 +399,8 @@ class Loan:
     returned_on: date | None = None
 ```
 
-<!-- file: fixtures/repo/src/shelf/settings.py -->
-**`fixtures/repo/src/shelf/settings.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/src/shelf/settings.py -->
+**`src/toolcallbench/data/fixtures/repo/src/shelf/settings.py`**
 
 ```python
 """Load the library settings."""
@@ -397,8 +417,8 @@ def load_settings(path: Path | None = None) -> dict:
         return json.load(handle)
 ```
 
-<!-- file: fixtures/repo/src/shelf/catalog.py -->
-**`fixtures/repo/src/shelf/catalog.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/src/shelf/catalog.py -->
+**`src/toolcallbench/data/fixtures/repo/src/shelf/catalog.py`**
 
 ```python
 """Read the book catalog and search it."""
@@ -436,8 +456,8 @@ def books_by_author(books: list[Book], author: str) -> list[Book]:
     return [b for b in books if b.author == author]
 ```
 
-<!-- file: fixtures/repo/src/shelf/fees.py -->
-**`fixtures/repo/src/shelf/fees.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/src/shelf/fees.py -->
+**`src/toolcallbench/data/fixtures/repo/src/shelf/fees.py`**
 
 ```python
 """Late-fee rules."""
@@ -462,8 +482,8 @@ def late_fee(days: int, per_day: float, cap: float | None = None) -> float:
     return round(days * per_day, 2)
 ```
 
-<!-- file: fixtures/repo/src/shelf/loans.py -->
-**`fixtures/repo/src/shelf/loans.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/src/shelf/loans.py -->
+**`src/toolcallbench/data/fixtures/repo/src/shelf/loans.py`**
 
 ```python
 """Borrowing and returning books."""
@@ -514,8 +534,8 @@ class Library:
         raise LoanError("no such loan")
 ```
 
-<!-- file: fixtures/repo/src/shelf/utils.py -->
-**`fixtures/repo/src/shelf/utils.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/src/shelf/utils.py -->
+**`src/toolcallbench/data/fixtures/repo/src/shelf/utils.py`**
 
 ```python
 """Small helpers used across the shelf package."""
@@ -541,8 +561,8 @@ def isbn_ok(isbn: str) -> bool:
 
 A script, a README, the pytest settings (`pythonpath = src` lets the tests import `shelf`):
 
-<!-- file: fixtures/repo/scripts/report.py -->
-**`fixtures/repo/scripts/report.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/scripts/report.py -->
+**`src/toolcallbench/data/fixtures/repo/scripts/report.py`**
 
 ```python
 """Print a short summary of the library."""
@@ -570,8 +590,8 @@ if __name__ == "__main__":
     main()
 ```
 
-<!-- file: fixtures/repo/README.md -->
-**`fixtures/repo/README.md`**
+<!-- file: src/toolcallbench/data/fixtures/repo/README.md -->
+**`src/toolcallbench/data/fixtures/repo/README.md`**
 
 ```markdown
 # shelf
@@ -593,8 +613,8 @@ change and run this code, so please keep it small.
 - Print the summary report: `python scripts/report.py`
 ```
 
-<!-- file: fixtures/repo/pytest.ini -->
-**`fixtures/repo/pytest.ini`**
+<!-- file: src/toolcallbench/data/fixtures/repo/pytest.ini -->
+**`src/toolcallbench/data/fixtures/repo/pytest.ini`**
 
 ```ini
 [pytest]
@@ -604,8 +624,8 @@ testpaths = tests
 
 The tests:
 
-<!-- file: fixtures/repo/tests/test_catalog.py -->
-**`fixtures/repo/tests/test_catalog.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/tests/test_catalog.py -->
+**`src/toolcallbench/data/fixtures/repo/tests/test_catalog.py`**
 
 ```python
 from shelf.catalog import books_by_author, find_by_isbn, load_books, search_by_title
@@ -629,8 +649,8 @@ def test_books_by_author():
     assert [b.title for b in books_by_author(load_books(), "George Orwell")] == ["Nineteen Eighty-Four"]
 ```
 
-<!-- file: fixtures/repo/tests/test_fees.py -->
-**`fixtures/repo/tests/test_fees.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/tests/test_fees.py -->
+**`src/toolcallbench/data/fixtures/repo/tests/test_fees.py`**
 
 ```python
 from datetime import date
@@ -651,8 +671,8 @@ def test_late_fee_is_capped():
     assert late_fee(100, 0.25, cap=10.0) == 10.0
 ```
 
-<!-- file: fixtures/repo/tests/test_loans.py -->
-**`fixtures/repo/tests/test_loans.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/tests/test_loans.py -->
+**`src/toolcallbench/data/fixtures/repo/tests/test_loans.py`**
 
 ```python
 from datetime import date, timedelta
@@ -689,8 +709,8 @@ def test_late_return_pays_fee(library):
     assert fee == 1.0
 ```
 
-<!-- file: fixtures/repo/tests/test_utils.py -->
-**`fixtures/repo/tests/test_utils.py`**
+<!-- file: src/toolcallbench/data/fixtures/repo/tests/test_utils.py -->
+**`src/toolcallbench/data/fixtures/repo/tests/test_utils.py`**
 
 ```python
 from shelf.utils import format_money, isbn_ok, slugify
@@ -712,17 +732,17 @@ def test_isbn_ok():
 ### Run
 
 ```text
-$ cd fixtures/repo && python -m pytest -q --tb=line
+$ cd src/toolcallbench/data/fixtures/repo && python -m pytest -q --tb=line
 ..F...F......                                                            [100%]
 =================================== FAILURES ===================================
 E   AssertionError: assert [] == ['Dune']
 
       Right contains one more item: 'Dune'
       Use -v to get more diff
-./fixtures/repo/tests/test_catalog.py:15: AssertionError: assert [] == ['Dune']
+/private./src/toolcallbench/data/fixtures/repo/tests/test_catalog.py:15: AssertionError: assert [] == ['Dune']
 E   assert 25.0 == 10.0
      +  where 25.0 = late_fee(100, 0.25, cap=10.0)
-./fixtures/repo/tests/test_fees.py:16: assert 25.0 == 10.0
+/private./src/toolcallbench/data/fixtures/repo/tests/test_fees.py:16: assert 25.0 == 10.0
 =========================== short test summary info ============================
 FAILED tests/test_catalog.py::test_search_is_case_insensitive - AssertionErro...
 FAILED tests/test_fees.py::test_late_fee_is_capped - assert 25.0 == 10.0
@@ -735,7 +755,7 @@ wrongly. The tasks later in this guide depend on these exact numbers (for exampl
 report script prints 11 copies in total):
 
 ```text
-$ cd fixtures/repo && python scripts/report.py
+$ cd src/toolcallbench/data/fixtures/repo && python scripts/report.py
 Library report
 Titles: 6
 Copies: 11
@@ -1323,8 +1343,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = ROOT / "fixtures" / "repo"
-TASKS_DIR = ROOT / "tasks"
+DATA = ROOT / "src" / "toolcallbench" / "data"
+FIXTURE = DATA / "fixtures" / "repo"
+TASKS_DIR = DATA / "tasks"
 
 
 @pytest.fixture(scope="session")
@@ -2009,8 +2030,16 @@ def load_config(path: Path) -> RunConfig:
     return cfg
 
 
+def data_dir() -> Path:
+    """The tasks, fixture repository and example configs that ship inside the installed package."""
+    return Path(__file__).resolve().parent / "data"
+
+
 def find_project_root(start: Path | None = None) -> Path:
-    """Walk up from `start` (default: the current directory) to a folder holding tasks/ and fixtures/repo/."""
+    """Walk up from `start` (default: the current directory) to a folder holding tasks/ and fixtures/repo/.
+
+    Returns `start` itself when there is none; the caller then falls back to the built-in data.
+    """
     start = Path(start or Path.cwd()).resolve()
     for candidate in [start, *start.parents]:
         if (candidate / "tasks").is_dir() and (candidate / "fixtures" / "repo").is_dir():
@@ -2021,13 +2050,14 @@ def find_project_root(start: Path | None = None) -> Path:
 Three ready-made config files. The first is the plan for your Mac, the second compares two
 quantization levels of the same model, the third needs no model.
 
-<!-- file: configs/m4-16gb.yaml -->
-**`configs/m4-16gb.yaml`**
+<!-- file: src/toolcallbench/data/configs/m4-16gb.yaml -->
+**`src/toolcallbench/data/configs/m4-16gb.yaml`**
 
 ```yaml
 # Benchmark plan for a MacBook M4 with 16 GB of unified memory.
-# Start the server first:  scripts/serve_ollama.sh
-# Then:                    toolcallbench run --config configs/m4-16gb.yaml
+# Start the server first:
+#   OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NUM_PARALLEL=1 ollama serve
+# Then:  toolcallbench run --config configs/m4-16gb.yaml
 backend: ollama
 host: http://localhost:11434
 settings:
@@ -2038,7 +2068,7 @@ settings:
   max_calls: 12
   max_turns: 10
   request_timeout: 300
-declared_server:      # what scripts/serve_ollama.sh starts; recorded in the report, not enforced
+declared_server:      # what the server command above uses; recorded in the report, not enforced
   kv_cache_type: q8_0
   flash_attention: true
 models:
@@ -2048,8 +2078,8 @@ models:
   - qwen2.5:7b
 ```
 
-<!-- file: configs/quant-sweep-qwen3-8b.yaml -->
-**`configs/quant-sweep-qwen3-8b.yaml`**
+<!-- file: src/toolcallbench/data/configs/quant-sweep-qwen3-8b.yaml -->
+**`src/toolcallbench/data/configs/quant-sweep-qwen3-8b.yaml`**
 
 ```yaml
 # Same model at two quantization levels: how much tool-calling accuracy does Q4 give up?
@@ -2071,8 +2101,8 @@ models:
   - qwen3:8b-q8_0
 ```
 
-<!-- file: configs/smoke-scripted.yaml -->
-**`configs/smoke-scripted.yaml`**
+<!-- file: src/toolcallbench/data/configs/smoke-scripted.yaml -->
+**`src/toolcallbench/data/configs/smoke-scripted.yaml`**
 
 ```yaml
 # No model needed: replays the reference solutions. Proves the harness works end to end.
@@ -2081,6 +2111,33 @@ settings:
   repeats: 1
 models:
   - scripted-oracle
+```
+
+And the starter file that `toolcallbench init` gives to users:
+
+<!-- file: src/toolcallbench/data/configs/my-models.yaml -->
+**`src/toolcallbench/data/configs/my-models.yaml`**
+
+```yaml
+backend: ollama
+host: http://localhost:11434
+settings:
+  num_ctx: 16384
+  temperature: 0.0
+  seed: 42
+  repeats: 1 # first pass: 5 models x 20 tasks = 100 runs. Use 3 later.
+  max_calls: 12
+  max_turns: 10
+  request_timeout: 600 # thinking models can be slow
+declared_server:
+  kv_cache_type: q8_0
+  flash_attention: true
+models:
+  - name: qwen3:8b
+    think: false
+  - llama3.1:8b
+  - gemma4:e4b
+  - qwen3.5:0.8b
 ```
 
 <!-- file: tests/test_config.py -->
@@ -2105,7 +2162,7 @@ def test_seed_changes_per_repeat():
 def test_shipped_configs_load():
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "configs"
+    root = Path(__file__).resolve().parents[1] / "src" / "toolcallbench" / "data" / "configs"
     for name in ("m4-16gb.yaml", "quant-sweep-qwen3-8b.yaml", "smoke-scripted.yaml"):
         cfg = load_config(root / name)
         assert cfg.models
@@ -2681,8 +2738,8 @@ def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int 
 Now the 20 tasks. Read two or three of them (start with `read-01` and `chain-04`) before you
 paste all of them.
 
-<!-- file: tasks/read-01.yaml -->
-**`tasks/read-01.yaml`**
+<!-- file: src/toolcallbench/data/tasks/read-01.yaml -->
+**`src/toolcallbench/data/tasks/read-01.yaml`**
 
 ```yaml
 id: read-01
@@ -2702,8 +2759,8 @@ reference:
   - final: loan_days is 14.
 ```
 
-<!-- file: tasks/read-02.yaml -->
-**`tasks/read-02.yaml`**
+<!-- file: src/toolcallbench/data/tasks/read-02.yaml -->
+**`src/toolcallbench/data/tasks/read-02.yaml`**
 
 ```yaml
 id: read-02
@@ -2723,8 +2780,8 @@ reference:
   - final: "src/shelf contains __init__.py, catalog.py, fees.py, loans.py, models.py, settings.py and utils.py."
 ```
 
-<!-- file: tasks/read-03.yaml -->
-**`tasks/read-03.yaml`**
+<!-- file: src/toolcallbench/data/tasks/read-03.yaml -->
+**`src/toolcallbench/data/tasks/read-03.yaml`**
 
 ```yaml
 id: read-03
@@ -2745,8 +2802,8 @@ reference:
   - final: late_fee is defined in src/shelf/fees.py at line 12.
 ```
 
-<!-- file: tasks/read-04.yaml -->
-**`tasks/read-04.yaml`**
+<!-- file: src/toolcallbench/data/tasks/read-04.yaml -->
+**`src/toolcallbench/data/tasks/read-04.yaml`**
 
 ```yaml
 id: read-04
@@ -2766,8 +2823,8 @@ reference:
   - final: The Hobbit has the most copies (3).
 ```
 
-<!-- file: tasks/read-05.yaml -->
-**`tasks/read-05.yaml`**
+<!-- file: src/toolcallbench/data/tasks/read-05.yaml -->
+**`src/toolcallbench/data/tasks/read-05.yaml`**
 
 ```yaml
 id: read-05
@@ -2788,8 +2845,8 @@ reference:
   - final: There are 3 members. Chen Wei joined most recently (2023-01-20).
 ```
 
-<!-- file: tasks/edit-01.yaml -->
-**`tasks/edit-01.yaml`**
+<!-- file: src/toolcallbench/data/tasks/edit-01.yaml -->
+**`src/toolcallbench/data/tasks/edit-01.yaml`**
 
 ```yaml
 id: edit-01
@@ -2817,8 +2874,8 @@ reference:
   - final: Changed loan_days to 21.
 ```
 
-<!-- file: tasks/edit-02.yaml -->
-**`tasks/edit-02.yaml`**
+<!-- file: src/toolcallbench/data/tasks/edit-02.yaml -->
+**`src/toolcallbench/data/tasks/edit-02.yaml`**
 
 ```yaml
 id: edit-02
@@ -2842,8 +2899,8 @@ reference:
   - final: Version is now 0.4.0.
 ```
 
-<!-- file: tasks/edit-03.yaml -->
-**`tasks/edit-03.yaml`**
+<!-- file: src/toolcallbench/data/tasks/edit-03.yaml -->
+**`src/toolcallbench/data/tasks/edit-03.yaml`**
 
 ```yaml
 id: edit-03
@@ -2880,8 +2937,8 @@ reference:
   - final: Changed late_fee_per_day to 0.5.
 ```
 
-<!-- file: tasks/edit-04.yaml -->
-**`tasks/edit-04.yaml`**
+<!-- file: src/toolcallbench/data/tasks/edit-04.yaml -->
+**`src/toolcallbench/data/tasks/edit-04.yaml`**
 
 ```yaml
 id: edit-04
@@ -2909,8 +2966,8 @@ reference:
   - final: Added shout() to src/shelf/utils.py.
 ```
 
-<!-- file: tasks/edit-05.yaml -->
-**`tasks/edit-05.yaml`**
+<!-- file: src/toolcallbench/data/tasks/edit-05.yaml -->
+**`src/toolcallbench/data/tasks/edit-05.yaml`**
 
 ```yaml
 id: edit-05
@@ -2938,8 +2995,8 @@ reference:
   - final: late_fee now applies the cap.
 ```
 
-<!-- file: tasks/run-01.yaml -->
-**`tasks/run-01.yaml`**
+<!-- file: src/toolcallbench/data/tasks/run-01.yaml -->
+**`src/toolcallbench/data/tasks/run-01.yaml`**
 
 ```yaml
 id: run-01
@@ -2959,8 +3016,8 @@ reference:
   - final: 2 tests fail.
 ```
 
-<!-- file: tasks/run-02.yaml -->
-**`tasks/run-02.yaml`**
+<!-- file: src/toolcallbench/data/tasks/run-02.yaml -->
+**`src/toolcallbench/data/tasks/run-02.yaml`**
 
 ```yaml
 id: run-02
@@ -2980,8 +3037,8 @@ reference:
   - final: The library owns 11 copies in total.
 ```
 
-<!-- file: tasks/run-03.yaml -->
-**`tasks/run-03.yaml`**
+<!-- file: src/toolcallbench/data/tasks/run-03.yaml -->
+**`src/toolcallbench/data/tasks/run-03.yaml`**
 
 ```yaml
 id: run-03
@@ -3001,8 +3058,8 @@ reference:
   - final: The data folder has books.csv and members.csv.
 ```
 
-<!-- file: tasks/chain-01.yaml -->
-**`tasks/chain-01.yaml`**
+<!-- file: src/toolcallbench/data/tasks/chain-01.yaml -->
+**`src/toolcallbench/data/tasks/chain-01.yaml`**
 
 ```yaml
 id: chain-01
@@ -3034,8 +3091,8 @@ reference:
   - final: Fixed search_by_title to ignore case; the catalog tests pass.
 ```
 
-<!-- file: tasks/chain-02.yaml -->
-**`tasks/chain-02.yaml`**
+<!-- file: src/toolcallbench/data/tasks/chain-02.yaml -->
+**`src/toolcallbench/data/tasks/chain-02.yaml`**
 
 ```yaml
 id: chain-02
@@ -3060,8 +3117,8 @@ reference:
   - final: The report shows 3 members.
 ```
 
-<!-- file: tasks/chain-03.yaml -->
-**`tasks/chain-03.yaml`**
+<!-- file: src/toolcallbench/data/tasks/chain-03.yaml -->
+**`src/toolcallbench/data/tasks/chain-03.yaml`**
 
 ```yaml
 id: chain-03
@@ -3085,8 +3142,8 @@ reference:
   - final: LoanError is in src/shelf/loans.py. The method is return_book.
 ```
 
-<!-- file: tasks/chain-04.yaml -->
-**`tasks/chain-04.yaml`**
+<!-- file: src/toolcallbench/data/tasks/chain-04.yaml -->
+**`src/toolcallbench/data/tasks/chain-04.yaml`**
 
 ```yaml
 id: chain-04
@@ -3129,8 +3186,8 @@ reference:
   - final: Fixed the title search and the late-fee cap; all tests pass.
 ```
 
-<!-- file: tasks/failure-01.yaml -->
-**`tasks/failure-01.yaml`**
+<!-- file: src/toolcallbench/data/tasks/failure-01.yaml -->
+**`src/toolcallbench/data/tasks/failure-01.yaml`**
 
 ```yaml
 id: failure-01
@@ -3145,8 +3202,8 @@ reference:
   - final: "42"
 ```
 
-<!-- file: tasks/failure-02.yaml -->
-**`tasks/failure-02.yaml`**
+<!-- file: src/toolcallbench/data/tasks/failure-02.yaml -->
+**`src/toolcallbench/data/tasks/failure-02.yaml`**
 
 ```yaml
 id: failure-02
@@ -3171,8 +3228,8 @@ reference:
   - final: The currency is USD and there are 3 members.
 ```
 
-<!-- file: tasks/failure-03.yaml -->
-**`tasks/failure-03.yaml`**
+<!-- file: src/toolcallbench/data/tasks/failure-03.yaml -->
+**`src/toolcallbench/data/tasks/failure-03.yaml`**
 
 ```yaml
 id: failure-03
@@ -3953,7 +4010,7 @@ HTTP code (URLs, JSON shapes, headers) without any model.
 **`src/toolcallbench/cli.py`**
 
 ```python
-"""Command-line interface: list-tasks, validate-tasks, doctor, run, report, sessions."""
+"""Command-line interface: init, list-tasks, validate-tasks, doctor, run, report, sessions."""
 from __future__ import annotations
 
 import argparse
@@ -3968,7 +4025,7 @@ from typing import Any
 
 from . import __version__
 from .backends import BACKEND_KINDS, PROFILES, BackendError, OllamaBackend, OpenAICompatBackend, ScriptedBackend, make_backend
-from .config import ConfigError, ModelSpec, RunConfig, find_project_root, load_config
+from .config import ConfigError, ModelSpec, RunConfig, data_dir, find_project_root, load_config
 from .models import Task
 from .report import markdown_to_html, render_markdown
 from .runner import SYSTEM_PROMPT, run_once
@@ -3988,8 +4045,10 @@ def _split(value: str | None) -> list[str] | None:
 
 def _paths(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
     root = Path(args.root).resolve() if args.root else find_project_root()
-    tasks_dir = Path(args.tasks_dir) if args.tasks_dir else root / "tasks"
-    fixture = Path(args.fixture) if args.fixture else root / "fixtures" / "repo"
+    local_tasks, local_fixture = root / "tasks", root / "fixtures" / "repo"
+    custom = local_tasks.is_dir() and local_fixture.is_dir()  # a folder with its own tasks wins over the built-in ones
+    tasks_dir = Path(args.tasks_dir) if args.tasks_dir else local_tasks if custom else data_dir() / "tasks"
+    fixture = Path(args.fixture) if args.fixture else local_fixture if custom else data_dir() / "fixtures" / "repo"
     results = Path(args.results_dir) if args.results_dir else root / "results"
     return root, tasks_dir, fixture, results
 
@@ -4079,6 +4138,27 @@ def cmd_list_tasks(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_init(args: argparse.Namespace) -> int:
+    """Copy the example configs (and optionally the tasks and fixture repo) into a working folder."""
+    target = Path(args.dir).resolve()
+    copies = [(data_dir() / "configs", target / "configs")]
+    if args.with_tasks:
+        copies += [(data_dir() / "tasks", target / "tasks"), (data_dir() / "fixtures" / "repo", target / "fixtures" / "repo")]
+    existing = [dest for _, dest in copies if dest.exists()]
+    if existing:
+        for dest in existing:
+            print(f"error: {dest} already exists; remove it or pick another folder", file=sys.stderr)
+        return 1
+    for src, dest in copies:
+        shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc"))
+        print(f"created {dest.relative_to(target)}/")
+    print("\nNext:")
+    print("  1. Edit configs/my-models.yaml and list the models you have pulled in Ollama")
+    print("  2. toolcallbench doctor --probe --config configs/my-models.yaml")
+    print("  3. toolcallbench run --config configs/my-models.yaml")
+    return 0
+
+
 def cmd_validate_tasks(args: argparse.Namespace) -> int:
     _, tasks_dir, fixture, _ = _paths(args)
     tasks = select_tasks(load_tasks(tasks_dir), _split(args.tasks), _split(args.groups))
@@ -4131,6 +4211,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         _line(True, "backend", "scripted (no server needed)")
         return 0 if all_ok else 1
     probe_backends = []
+    cfg = load_config(Path(args.config)) if args.config else RunConfig()
+    think_by_model = {spec.name: spec.think for spec in cfg.models}
     try:
         if kind == "ollama":
             first = OllamaBackend(args.model[0] if args.model else "", host=host, timeout=10)
@@ -4138,7 +4220,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             installed = first.list_models()
             all_ok &= _line(True, "Ollama server", f"version {version} at {host}; {len(installed)} model(s) installed")
             for name in args.model or []:
-                backend = OllamaBackend(name, host=host, timeout=30)
+                backend = OllamaBackend(
+                    name, host=host, options=cfg.options_for(1), think=think_by_model.get(name), timeout=cfg.request_timeout
+                )
                 if not ({name, name if ":" in name else name + ":latest"} & set(installed)):
                     all_ok &= _line(False, f"model {name}", f"not installed; run: ollama pull {name}")
                     continue
@@ -4290,10 +4374,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--root", help="project folder holding tasks/ and fixtures/ (default: found from the current folder)")
+    common.add_argument("--root", help="working folder; results go to <root>/results (default: the current folder). A tasks/ and fixtures/repo/ inside it replace the built-in tasks")
     common.add_argument("--tasks-dir", help="folder of task YAML files")
     common.add_argument("--fixture", help="fixture repository to copy for every run")
     common.add_argument("--results-dir", help="where results.sqlite, logs and reports go")
+
+    p = sub.add_parser("init", help="create a working folder with example configs")
+    p.add_argument("dir", nargs="?", default=".", help="folder to create files in (default: the current folder)")
+    p.add_argument("--with-tasks", action="store_true", help="also copy the 20 tasks and the fixture repo so you can edit them")
+    p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("list-tasks", parents=[common], help="list the benchmark tasks")
     p.add_argument("--markdown", action="store_true", help="print a Markdown table")
@@ -4308,11 +4397,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backend", choices=BACKEND_KINDS)
     p.add_argument("--host")
     p.add_argument("--model", action="append", help="model to check (repeatable)")
+    p.add_argument("--config", help="YAML config file; the probe then uses its settings (num_ctx, temperature, think, timeout)")
     p.add_argument("--probe", action="store_true", help="run one real task against each model")
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("run", parents=[common], help="run the benchmark")
-    p.add_argument("--config", help="YAML config file (see configs/)")
+    p.add_argument("--config", help="YAML config file (create examples with: toolcallbench init)")
     p.add_argument("--backend", choices=BACKEND_KINDS)
     p.add_argument("--host", help="server address")
     p.add_argument("--model", action="append", help="model name (repeatable); replaces models from --config")
@@ -4644,6 +4734,22 @@ def test_three_backend_errors_in_a_row_stop_a_model(tmp_path, monkeypatch, capsy
     db = sqlite3.connect(res / "results.sqlite")
     assert db.execute("select count(*), min(status), max(status) from runs").fetchone() == (3, "error", "error")
     assert db.execute("select count(*) from runs where passed = 1").fetchone()[0] == 0
+
+
+def test_init_creates_configs_and_refuses_overwrite(tmp_path, capsys):
+    assert cli("init", str(tmp_path)) == 0
+    assert (tmp_path / "configs" / "my-models.yaml").is_file()
+    assert not (tmp_path / "tasks").exists()
+    assert cli("init", str(tmp_path)) == 1
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_init_with_tasks_gives_a_folder_that_runs(tmp_path, capsys, monkeypatch):
+    assert cli("init", str(tmp_path), "--with-tasks") == 0
+    assert (tmp_path / "fixtures" / "repo" / "pytest.ini").is_file()
+    monkeypatch.chdir(tmp_path)
+    assert cli("validate-tasks") == 0
+    assert "20/20 reference solutions pass" in capsys.readouterr().out
 ```
 
 ### Run
@@ -4729,8 +4835,8 @@ session demo: 1 model(s) x 20 task(s) x 1 repeat(s) = 20 runs
 [19/20] scripted-oracle run-02 rep 1: PASS N.Ns
 [20/20] scripted-oracle run-03 rep 1: PASS N.Ns
 
-report: ./results/reports/demo.md
-        ./results/reports/demo.html
+report: /private./results/reports/demo.md
+        /private./results/reports/demo.html
 ```
 
 The beginning of the report it wrote:
@@ -4739,7 +4845,7 @@ The beginning of the report it wrote:
 $ toolcallbench report --session demo --print | sed -n 1,24p
 # ToolCallBench report: demo
 
-Started 2026-10-24T02:52:13+00:00. 20 runs: 1 model(s), 20 task(s), 1 repeat(s) each.
+Started 2026-10-24T09:16:43+00:00. 20 runs: 1 model(s), 20 task(s), 1 repeat(s) each.
 
 ## Settings
 
@@ -4756,9 +4862,9 @@ Started 2026-10-24T02:52:13+00:00. 20 runs: 1 model(s), 20 task(s), 1 repeat(s) 
 | KV cache type (declared) | f16 |
 | Flash attention (declared) | False |
 | System prompt hash | 368df4cf6d7a |
-| ToolCallBench version | 0.1.0 |
-| Platform | Linux x86_64 |
-| Python | 3.13.17 |
+| ToolCallBench version | 1.0.0 |
+| Platform | Darwin arm64 |
+| Python | 3.14.3 |
 
 ## Summary
 ```
@@ -4767,8 +4873,8 @@ The doctor with the fake backend:
 
 ```text
 $ toolcallbench doctor --backend scripted
-[ OK ] Python 3.10 or newer: 3.13.17
-[ OK ] task files: 20 tasks in ./tasks
+[ OK ] Python 3.10 or newer: 3.14.3
+[ OK ] task files: 20 tasks in /Users/herinpatel/Development/code_2.0/toolcallbench/src/toolcallbench/data/tasks
 [ OK ] fixture repo: 2 failing test(s); the tasks expect exactly 2
 [ OK ] backend: scripted (no server needed)
 ```
@@ -4777,9 +4883,9 @@ And the whole test suite so far (this takes about a minute):
 
 ```text
 $ python -m pytest
-........................................................................ [ 88%]
-.........                                                                [100%]
-81 passed in N.NNs
+........................................................................ [ 86%]
+...........                                                              [100%]
+83 passed in N.NNs
 ```
 
 ### Checkpoint
@@ -4941,7 +5047,7 @@ def describe_expect(expect: dict) -> list[str]:
 
 
 def render() -> str:
-    tasks = load_tasks(ROOT / "tasks")
+    tasks = load_tasks(ROOT / "src" / "toolcallbench" / "data" / "tasks")
     out = [
         "# Task catalog",
         "",
@@ -5200,25 +5306,47 @@ another model, and writes a report that compares models and quantization levels.
 It is tuned for a **MacBook M4 with 16 GB of memory** running Ollama, and works with any
 OpenAI-compatible local server (llama.cpp, LM Studio, vLLM).
 
-## Quick start
+## Install and run
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install toolcallbench
 
-toolcallbench validate-tasks                        # 20/20 reference solutions pass
-python -m pytest                                    # the automated tests
-toolcallbench run --backend scripted --repeats 1    # whole pipeline, no model needed
+mkdir my-bench && cd my-bench
+toolcallbench init                                  # creates configs/ with example settings
 ```
 
-With a real model:
+Edit `configs/my-models.yaml` and list the models you have pulled in Ollama, then:
 
 ```bash
-./scripts/serve_ollama.sh                           # terminal 1 (quit the Ollama menu-bar app first)
-ollama pull qwen3:8b                                # terminal 2
-toolcallbench doctor --model qwen3:8b --probe
-toolcallbench run --config configs/m4-16gb.yaml
-open results/reports/*.html
+toolcallbench doctor --probe --config configs/my-models.yaml   # check Ollama, models, tool calling
+toolcallbench run --config configs/my-models.yaml              # run the 20 tasks
+toolcallbench sessions                                         # list past runs
+toolcallbench report --session <id>                            # Markdown + HTML report in ./results/reports
+```
+
+Every setting can also be given as an argument, and arguments override the config file:
+
+```bash
+toolcallbench run --model qwen3:8b --model gemma4:e4b --repeats 3 --num-ctx 16384 --groups read,edit
+toolcallbench run --help
+```
+
+Other commands: `toolcallbench list-tasks`, `toolcallbench validate-tasks`, `toolcallbench init --with-tasks`
+(copies the tasks and sample repo so you can edit them; a folder with its own `tasks/` and
+`fixtures/repo/` uses them instead of the built-in ones). Results are written to `./results`.
+
+No model yet? `toolcallbench run --backend scripted --repeats 1` runs the whole pipeline without one.
+
+Ollama must be running (`ollama serve`) with the models pulled (`ollama pull qwen3:8b`).
+On a 16 GB Mac, start from the `m4-16gb.yaml` example config. See [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+
+### Develop
+
+```bash
+git clone <repo> && cd toolcallbench
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+python -m pytest
 ```
 
 ## What a report tells you
@@ -5230,7 +5358,7 @@ open results/reports/*.html
 
 ## Status
 
-Version 0.1.0. The harness, tasks, scoring, backends (checked against mock servers) and
+Version 1.0.0. The harness, tasks, scoring, backends (checked against mock servers) and
 reports are covered by automated tests. **No real model has been benchmarked yet**; run it on
 your Mac to get the first numbers (`docs/TEST_PLAN.md` lists exactly what was and was not tested).
 
@@ -5246,6 +5374,7 @@ your Mac to get the first numbers (`docs/TEST_PLAN.md` lists exactly what was an
 | [docs/SECURITY.md](docs/SECURITY.md) | What protects you and what does not |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Why it is built this way |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Install, run, read the report, troubleshoot |
+| [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) | Every command, option and config key |
 | [docs/MODEL_GUIDE_M4_16GB.md](docs/MODEL_GUIDE_M4_16GB.md) | Memory budget and model choices for 16 GB |
 | [docs/TASK_CATALOG.md](docs/TASK_CATALOG.md) | All 20 tasks (generated) |
 | [docs/ROADMAP.md](docs/ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md) | Project housekeeping |
@@ -5259,7 +5388,7 @@ MIT
 **`Makefile`**
 
 ```text
-.PHONY: install test validate smoke docs check serve clean
+.PHONY: install test validate smoke docs check serve release clean
 
 install:
 	pip install -e ".[dev]"
@@ -5284,6 +5413,11 @@ check: test validate
 
 serve:
 	./scripts/serve_ollama.sh
+
+release:
+	rm -rf dist
+	python -m build
+	twine check dist/*
 
 clean:
 	rm -rf results results-smoke .pytest_cache build *.egg-info
@@ -5356,11 +5490,11 @@ def collect_files() -> list[str]:
     for name in ("pyproject.toml", ".gitignore", "Makefile", "README.md", ".github/workflows/ci.yml"):
         if (ROOT / name).is_file():
             found.add(name)
-    for folder, pattern in (("src", "*.py"), ("tests", "*.py"), ("tasks", "*.yaml"), ("configs", "*.yaml"), ("scripts", "*")):
+    for folder, pattern in (("src", "*.py"), ("tests", "*.py"), ("scripts", "*")):
         for path in (ROOT / folder).rglob(pattern):
             if path.is_file() and not SKIP_PARTS & set(path.relative_to(ROOT).parts) and "egg-info" not in str(path):
                 found.add(path.relative_to(ROOT).as_posix())
-    for path in (ROOT / "fixtures" / "repo").rglob("*"):
+    for path in (ROOT / "src" / "toolcallbench" / "data").rglob("*"):
         if path.is_file() and not SKIP_PARTS & set(path.relative_to(ROOT).parts):
             found.add(path.relative_to(ROOT).as_posix())
     return sorted(found)
@@ -5534,9 +5668,9 @@ The full test suite, one last time:
 
 ```text
 $ python -m pytest
-........................................................................ [ 88%]
-.........                                                                [100%]
-81 passed in N.NNs
+........................................................................ [ 86%]
+...........                                                              [100%]
+83 passed in N.NNs
 ```
 
 ### Publish

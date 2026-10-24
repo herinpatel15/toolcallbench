@@ -86,7 +86,7 @@ git init
 python3 -m venv .venv
 source .venv/bin/activate        # run this again in every new terminal
 touch README.md                  # a real README comes on Day 9
-mkdir -p src/toolcallbench tests tasks configs scripts fixtures/repo
+mkdir -p src/toolcallbench/data/tasks src/toolcallbench/data/configs src/toolcallbench/data/fixtures/repo tests scripts
 ```
 
 ### Create
@@ -137,7 +137,7 @@ git add -A && git commit -m "Day 0: project skeleton"
 
 A benchmark needs something to work on. We want a small project that is realistic (code,
 config, data, tests) and has known bugs, so we can ask a model to "fix the failing tests" and
-check the answer with code. It lives in `fixtures/repo`. For every run, the program copies it
+check the answer with code. It lives in `src/toolcallbench/data/fixtures/repo`. For every run, the program copies it
 to a temporary folder, so the model can never break the original.
 
 The two bugs are on purpose:
@@ -151,55 +151,55 @@ Do not fix them. The tasks need them.
 
 Settings and data:
 
-{{file:fixtures/repo/config/settings.json}}
+{{file:src/toolcallbench/data/fixtures/repo/config/settings.json}}
 
-{{file:fixtures/repo/data/books.csv}}
+{{file:src/toolcallbench/data/fixtures/repo/data/books.csv}}
 
-{{file:fixtures/repo/data/members.csv}}
+{{file:src/toolcallbench/data/fixtures/repo/data/members.csv}}
 
 The package. Read `catalog.py` and `fees.py` and find the two bugs.
 
-{{file:fixtures/repo/src/shelf/__init__.py}}
+{{file:src/toolcallbench/data/fixtures/repo/src/shelf/__init__.py}}
 
-{{file:fixtures/repo/src/shelf/models.py}}
+{{file:src/toolcallbench/data/fixtures/repo/src/shelf/models.py}}
 
-{{file:fixtures/repo/src/shelf/settings.py}}
+{{file:src/toolcallbench/data/fixtures/repo/src/shelf/settings.py}}
 
-{{file:fixtures/repo/src/shelf/catalog.py}}
+{{file:src/toolcallbench/data/fixtures/repo/src/shelf/catalog.py}}
 
-{{file:fixtures/repo/src/shelf/fees.py}}
+{{file:src/toolcallbench/data/fixtures/repo/src/shelf/fees.py}}
 
-{{file:fixtures/repo/src/shelf/loans.py}}
+{{file:src/toolcallbench/data/fixtures/repo/src/shelf/loans.py}}
 
-{{file:fixtures/repo/src/shelf/utils.py}}
+{{file:src/toolcallbench/data/fixtures/repo/src/shelf/utils.py}}
 
 A script, a README, the pytest settings (`pythonpath = src` lets the tests import `shelf`):
 
-{{file:fixtures/repo/scripts/report.py}}
+{{file:src/toolcallbench/data/fixtures/repo/scripts/report.py}}
 
-{{file:fixtures/repo/README.md}}
+{{file:src/toolcallbench/data/fixtures/repo/README.md}}
 
-{{file:fixtures/repo/pytest.ini}}
+{{file:src/toolcallbench/data/fixtures/repo/pytest.ini}}
 
 The tests:
 
-{{file:fixtures/repo/tests/test_catalog.py}}
+{{file:src/toolcallbench/data/fixtures/repo/tests/test_catalog.py}}
 
-{{file:fixtures/repo/tests/test_fees.py}}
+{{file:src/toolcallbench/data/fixtures/repo/tests/test_fees.py}}
 
-{{file:fixtures/repo/tests/test_loans.py}}
+{{file:src/toolcallbench/data/fixtures/repo/tests/test_loans.py}}
 
-{{file:fixtures/repo/tests/test_utils.py}}
+{{file:src/toolcallbench/data/fixtures/repo/tests/test_utils.py}}
 
 ### Run
 
-{{cmd:cd fixtures/repo && python -m pytest -q --tb=line}}
+{{cmd:cd src/toolcallbench/data/fixtures/repo && python -m pytest -q --tb=line}}
 
 You must see **2 failed, 11 passed**. If you see a different number, a file was copied
 wrongly. The tasks later in this guide depend on these exact numbers (for example, the
 report script prints 11 copies in total):
 
-{{cmd:cd fixtures/repo && python scripts/report.py}}
+{{cmd:cd src/toolcallbench/data/fixtures/repo && python scripts/report.py}}
 
 ### Checkpoint
 
@@ -302,11 +302,15 @@ uses only Python's standard library.
 Three ready-made config files. The first is the plan for your Mac, the second compares two
 quantization levels of the same model, the third needs no model.
 
-{{file:configs/m4-16gb.yaml}}
+{{file:src/toolcallbench/data/configs/m4-16gb.yaml}}
 
-{{file:configs/quant-sweep-qwen3-8b.yaml}}
+{{file:src/toolcallbench/data/configs/quant-sweep-qwen3-8b.yaml}}
 
-{{file:configs/smoke-scripted.yaml}}
+{{file:src/toolcallbench/data/configs/smoke-scripted.yaml}}
+
+And the starter file that `toolcallbench init` gives to users:
+
+{{file:src/toolcallbench/data/configs/my-models.yaml}}
 
 {{file:tests/test_config.py}}
 
@@ -374,45 +378,45 @@ The scoring rules and the runner:
 Now the 20 tasks. Read two or three of them (start with `read-01` and `chain-04`) before you
 paste all of them.
 
-{{file:tasks/read-01.yaml}}
+{{file:src/toolcallbench/data/tasks/read-01.yaml}}
 
-{{file:tasks/read-02.yaml}}
+{{file:src/toolcallbench/data/tasks/read-02.yaml}}
 
-{{file:tasks/read-03.yaml}}
+{{file:src/toolcallbench/data/tasks/read-03.yaml}}
 
-{{file:tasks/read-04.yaml}}
+{{file:src/toolcallbench/data/tasks/read-04.yaml}}
 
-{{file:tasks/read-05.yaml}}
+{{file:src/toolcallbench/data/tasks/read-05.yaml}}
 
-{{file:tasks/edit-01.yaml}}
+{{file:src/toolcallbench/data/tasks/edit-01.yaml}}
 
-{{file:tasks/edit-02.yaml}}
+{{file:src/toolcallbench/data/tasks/edit-02.yaml}}
 
-{{file:tasks/edit-03.yaml}}
+{{file:src/toolcallbench/data/tasks/edit-03.yaml}}
 
-{{file:tasks/edit-04.yaml}}
+{{file:src/toolcallbench/data/tasks/edit-04.yaml}}
 
-{{file:tasks/edit-05.yaml}}
+{{file:src/toolcallbench/data/tasks/edit-05.yaml}}
 
-{{file:tasks/run-01.yaml}}
+{{file:src/toolcallbench/data/tasks/run-01.yaml}}
 
-{{file:tasks/run-02.yaml}}
+{{file:src/toolcallbench/data/tasks/run-02.yaml}}
 
-{{file:tasks/run-03.yaml}}
+{{file:src/toolcallbench/data/tasks/run-03.yaml}}
 
-{{file:tasks/chain-01.yaml}}
+{{file:src/toolcallbench/data/tasks/chain-01.yaml}}
 
-{{file:tasks/chain-02.yaml}}
+{{file:src/toolcallbench/data/tasks/chain-02.yaml}}
 
-{{file:tasks/chain-03.yaml}}
+{{file:src/toolcallbench/data/tasks/chain-03.yaml}}
 
-{{file:tasks/chain-04.yaml}}
+{{file:src/toolcallbench/data/tasks/chain-04.yaml}}
 
-{{file:tasks/failure-01.yaml}}
+{{file:src/toolcallbench/data/tasks/failure-01.yaml}}
 
-{{file:tasks/failure-02.yaml}}
+{{file:src/toolcallbench/data/tasks/failure-02.yaml}}
 
-{{file:tasks/failure-03.yaml}}
+{{file:src/toolcallbench/data/tasks/failure-03.yaml}}
 
 The tests. `test_tasks.py` replays all 20 reference solutions. `test_checks.py` makes the fake
 model fail in each way and checks that the scorer names the right failure.

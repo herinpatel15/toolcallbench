@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = ROOT / "fixtures" / "repo"
-TASKS_DIR = ROOT / "tasks"
+DATA = ROOT / "src" / "toolcallbench" / "data"
+FIXTURE = DATA / "fixtures" / "repo"
+TASKS_DIR = DATA / "tasks"
 
 
 @pytest.fixture(scope="session")

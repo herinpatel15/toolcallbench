@@ -1,4 +1,4 @@
-"""Command-line interface: list-tasks, validate-tasks, doctor, run, report, sessions."""
+"""Command-line interface: init, list-tasks, validate-tasks, doctor, run, report, sessions."""
 from __future__ import annotations
 
 import argparse
@@ -13,7 +13,7 @@ from typing import Any
 
 from . import __version__
 from .backends import BACKEND_KINDS, PROFILES, BackendError, OllamaBackend, OpenAICompatBackend, ScriptedBackend, make_backend
-from .config import ConfigError, ModelSpec, RunConfig, find_project_root, load_config
+from .config import ConfigError, ModelSpec, RunConfig, data_dir, find_project_root, load_config
 from .models import Task
 from .report import markdown_to_html, render_markdown
 from .runner import SYSTEM_PROMPT, run_once
@@ -33,8 +33,10 @@ def _split(value: str | None) -> list[str] | None:
 
 def _paths(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
     root = Path(args.root).resolve() if args.root else find_project_root()
-    tasks_dir = Path(args.tasks_dir) if args.tasks_dir else root / "tasks"
-    fixture = Path(args.fixture) if args.fixture else root / "fixtures" / "repo"
+    local_tasks, local_fixture = root / "tasks", root / "fixtures" / "repo"
+    custom = local_tasks.is_dir() and local_fixture.is_dir()  # a folder with its own tasks wins over the built-in ones
+    tasks_dir = Path(args.tasks_dir) if args.tasks_dir else local_tasks if custom else data_dir() / "tasks"
+    fixture = Path(args.fixture) if args.fixture else local_fixture if custom else data_dir() / "fixtures" / "repo"
     results = Path(args.results_dir) if args.results_dir else root / "results"
     return root, tasks_dir, fixture, results
 
@@ -121,6 +123,27 @@ def cmd_list_tasks(args: argparse.Namespace) -> int:
         for t in tasks:
             print(f"{t.id:<12} {t.group:<8} calls={t.baseline_calls}  {t.title}")
         print(f"\n{len(tasks)} tasks")
+    return 0
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    """Copy the example configs (and optionally the tasks and fixture repo) into a working folder."""
+    target = Path(args.dir).resolve()
+    copies = [(data_dir() / "configs", target / "configs")]
+    if args.with_tasks:
+        copies += [(data_dir() / "tasks", target / "tasks"), (data_dir() / "fixtures" / "repo", target / "fixtures" / "repo")]
+    existing = [dest for _, dest in copies if dest.exists()]
+    if existing:
+        for dest in existing:
+            print(f"error: {dest} already exists; remove it or pick another folder", file=sys.stderr)
+        return 1
+    for src, dest in copies:
+        shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc"))
+        print(f"created {dest.relative_to(target)}/")
+    print("\nNext:")
+    print("  1. Edit configs/my-models.yaml and list the models you have pulled in Ollama")
+    print("  2. toolcallbench doctor --probe --config configs/my-models.yaml")
+    print("  3. toolcallbench run --config configs/my-models.yaml")
     return 0
 
 
@@ -339,10 +362,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--root", help="project folder holding tasks/ and fixtures/ (default: found from the current folder)")
+    common.add_argument("--root", help="working folder; results go to <root>/results (default: the current folder). A tasks/ and fixtures/repo/ inside it replace the built-in tasks")
     common.add_argument("--tasks-dir", help="folder of task YAML files")
     common.add_argument("--fixture", help="fixture repository to copy for every run")
     common.add_argument("--results-dir", help="where results.sqlite, logs and reports go")
+
+    p = sub.add_parser("init", help="create a working folder with example configs")
+    p.add_argument("dir", nargs="?", default=".", help="folder to create files in (default: the current folder)")
+    p.add_argument("--with-tasks", action="store_true", help="also copy the 20 tasks and the fixture repo so you can edit them")
+    p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("list-tasks", parents=[common], help="list the benchmark tasks")
     p.add_argument("--markdown", action="store_true", help="print a Markdown table")
@@ -362,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("run", parents=[common], help="run the benchmark")
-    p.add_argument("--config", help="YAML config file (see configs/)")
+    p.add_argument("--config", help="YAML config file (create examples with: toolcallbench init)")
     p.add_argument("--backend", choices=BACKEND_KINDS)
     p.add_argument("--host", help="server address")
     p.add_argument("--model", action="append", help="model name (repeatable); replaces models from --config")

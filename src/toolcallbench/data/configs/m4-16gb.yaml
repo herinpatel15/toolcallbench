@@ -1,6 +1,7 @@
 # Benchmark plan for a MacBook M4 with 16 GB of unified memory.
-# Start the server first:  scripts/serve_ollama.sh
-# Then:                    toolcallbench run --config configs/m4-16gb.yaml
+# Start the server first:
+#   OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NUM_PARALLEL=1 ollama serve
+# Then:  toolcallbench run --config configs/m4-16gb.yaml
 backend: ollama
 host: http://localhost:11434
 settings:
@@ -11,7 +12,7 @@ settings:
   max_calls: 12
   max_turns: 10
   request_timeout: 300
-declared_server:      # what scripts/serve_ollama.sh starts; recorded in the report, not enforced
+declared_server:      # what the server command above uses; recorded in the report, not enforced
   kv_cache_type: q8_0
   flash_attention: true
 models:

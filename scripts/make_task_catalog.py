@@ -49,7 +49,7 @@ def describe_expect(expect: dict) -> list[str]:
 
 
 def render() -> str:
-    tasks = load_tasks(ROOT / "tasks")
+    tasks = load_tasks(ROOT / "src" / "toolcallbench" / "data" / "tasks")
     out = [
         "# Task catalog",
         "",

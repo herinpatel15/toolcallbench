@@ -1,4 +1,4 @@
-.PHONY: install test validate smoke docs check serve clean
+.PHONY: install test validate smoke docs check serve release clean
 
 install:
 	pip install -e ".[dev]"
@@ -23,6 +23,11 @@ check: test validate
 
 serve:
 	./scripts/serve_ollama.sh
+
+release:
+	rm -rf dist
+	python -m build
+	twine check dist/*
 
 clean:
 	rm -rf results results-smoke .pytest_cache build *.egg-info

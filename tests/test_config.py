@@ -16,7 +16,7 @@ def test_seed_changes_per_repeat():
 def test_shipped_configs_load():
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "configs"
+    root = Path(__file__).resolve().parents[1] / "src" / "toolcallbench" / "data" / "configs"
     for name in ("m4-16gb.yaml", "quant-sweep-qwen3-8b.yaml", "smoke-scripted.yaml"):
         cfg = load_config(root / name)
         assert cfg.models

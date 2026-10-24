@@ -3,39 +3,49 @@
 ## Install
 
 ```bash
-git clone <your repo> toolcallbench && cd toolcallbench
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install toolcallbench          # Python 3.10 or newer
+mkdir my-bench && cd my-bench
+toolcallbench init                 # creates ./configs with example settings
 ```
+
+Use a virtual environment if you like (`python3 -m venv .venv && source .venv/bin/activate`).
+To work on the code itself, clone the repository and run `pip install -e ".[dev]"`.
 
 Check the install without any model:
 
 ```bash
-toolcallbench validate-tasks      # 20/20 reference solutions pass
-python -m pytest                  # full test suite
-toolcallbench run --backend scripted --repeats 1    # whole pipeline with a fake model
+toolcallbench validate-tasks                         # 20/20 reference solutions pass
+toolcallbench run --backend scripted --repeats 1     # whole pipeline with a fake model
 ```
 
-## Run on your Mac with Ollama
+## Run with Ollama
 
-1. Install Ollama from <https://ollama.com> and **quit the menu-bar app** (so it does not hold the port with default settings).
-2. Terminal 1: `./scripts/serve_ollama.sh`
-3. Terminal 2: pull the models, then check:
+1. Install Ollama from <https://ollama.com>. On a Mac, **quit the menu-bar app** so it does not hold the port with default settings.
+2. Terminal 1: start the server with settings suited to a 16 GB machine:
+
+```bash
+OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 \
+OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NUM_PARALLEL=1 ollama serve
+```
+
+3. Terminal 2: pull the models, list them in `configs/my-models.yaml`, then check:
 
 ```bash
 ollama pull qwen3:8b
-toolcallbench doctor --model qwen3:8b --probe
+toolcallbench doctor --probe --config configs/my-models.yaml
 ```
 
-`--probe` runs one real task. If it fails, read the message before going further.
+`--probe` runs one real task per model. Always pass `--config`: without it the probe uses the
+server's defaults and gives different answers from the real run. If a probe fails, read the
+message before going further.
 
 4. Run:
 
 ```bash
-toolcallbench run --config configs/m4-16gb.yaml
+toolcallbench run --config configs/my-models.yaml
 ```
 
-Or a single model with options:
+Or one model with options:
 
 ```bash
 toolcallbench run --model qwen3:8b --think off --repeats 3 --kv-cache-type q8_0 --flash-attention
@@ -45,11 +55,14 @@ toolcallbench run --model qwen3:8b --think off --repeats 3 --kv-cache-type q8_0 
 
 ## Commands
 
+The full list of options is in [CLI_REFERENCE.md](CLI_REFERENCE.md).
+
 | Command | Purpose |
 | --- | --- |
+| `init [DIR] [--with-tasks]` | Create example configs (and optionally editable tasks) |
 | `list-tasks [--markdown]` | Show the 20 tasks |
 | `validate-tasks [--tasks ids] [--groups names]` | Replay reference solutions |
-| `doctor [--model NAME] [--probe] [--backend K] [--host URL]` | Check setup; probe a model |
+| `doctor [--config FILE] [--model NAME] [--probe] [--backend K] [--host URL]` | Check setup; probe a model |
 | `run` | Run the benchmark; key options below |
 | `report [--session ID] [--print]` | Rebuild a report from stored results |
 | `sessions` | List stored sessions |
@@ -95,12 +108,14 @@ Copy the project first and remove secrets (see `SECURITY.md`). Write tasks in
 
 | Symptom | Fix |
 | --- | --- |
-| `cannot reach http://localhost:11434` | Start the server: `./scripts/serve_ollama.sh` |
+| `cannot reach http://localhost:11434` | Start the server (`ollama serve`, see above). In a probe, a timeout can also mean the model is still loading: use `--config` and raise `request_timeout` |
+| Probe results change between runs | You ran `doctor --probe` without `--config`; add it so temperature and seed are fixed |
+| `no task files (*.yaml) found in …/tasks` | The current folder has its own empty `tasks/` and `fixtures/repo/`, which replace the built-in ones. Run from another folder or delete them |
 | `model 'x' is not installed` | `ollama pull x` |
 | `doctor` says the model does not report tool support | Choose a model whose Ollama page lists "tools" |
 | Every run fails with `no_call` | The model may not support tools, or the template is wrong; check `doctor --probe` |
 | Very slow runs with Qwen3 | Add `--think off` (or `think: false` for that model in the config file) |
 | `HTTP 400 ... does not support thinking` | That model has no thinking mode; remove `--think`, and set `think` only on models that have it (per model in the config file) |
 | Mac becomes slow, fans loud | Lower `--num-ctx` to 8192, use a smaller model, close other apps; see `MODEL_GUIDE_M4_16GB.md` |
-| `fixture repo: 0 failing test(s)` in doctor | The fixture was modified; restore `fixtures/repo` |
+| `fixture repo: 0 failing test(s)` in doctor | The fixture was modified; restore `src/toolcallbench/data/fixtures/repo` (reinstall the package) |
 | Session exists | Add `--resume` or choose a new `--session` |
