@@ -1,0 +1,19 @@
+backend: ollama
+host: http://localhost:11434
+settings:
+  num_ctx: 16384
+  temperature: 0.0
+  seed: 42
+  repeats: 1 # first pass: 5 models x 20 tasks = 100 runs. Use 3 later.
+  max_calls: 12
+  max_turns: 10
+  request_timeout: 600 # thinking models can be slow
+declared_server:
+  kv_cache_type: q8_0
+  flash_attention: true
+models:
+  - name: qwen3:8b
+    think: false
+  - llama3.1:8b
+  - gemma4:e4b
+  - qwen3.5:0.8b

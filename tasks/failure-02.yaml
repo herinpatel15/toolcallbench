@@ -1,0 +1,20 @@
+id: failure-02
+group: failure
+title: Two independent reads in one step
+prompt: |
+  I need two things: the currency in config/settings.json and the number of members in data/members.csv.
+  The two reads do not depend on each other, so request both in the same step.
+expect:
+  calls:
+    - tool: read_file
+      args: {path: config/settings.json}
+    - tool: read_file
+      args: {path: data/members.csv}
+  parallel: true
+  answer_contains: [USD]
+  answer_regex: ['\b3\b|three']
+reference:
+  - calls:
+      - {tool: read_file, args: {path: config/settings.json}}
+      - {tool: read_file, args: {path: data/members.csv}}
+  - final: The currency is USD and there are 3 members.

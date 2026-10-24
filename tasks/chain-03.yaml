@@ -1,0 +1,19 @@
+id: chain-03
+group: chain
+title: Locate a class, then read it
+prompt: |
+  Find which file defines the class LoanError. Then read that file and tell me the name of the
+  Library method that takes a book back from a member.
+expect:
+  calls:
+    - tool: [grep, list_dir]
+    - tool: read_file
+      args: {path: src/shelf/loans.py}
+  ordered: true
+  answer_contains: [return_book]
+reference:
+  - calls:
+      - {tool: grep, args: {pattern: "class LoanError"}}
+  - calls:
+      - {tool: read_file, args: {path: src/shelf/loans.py}}
+  - final: LoanError is in src/shelf/loans.py. The method is return_book.

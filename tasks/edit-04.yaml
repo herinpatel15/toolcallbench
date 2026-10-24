@@ -1,0 +1,23 @@
+id: edit-04
+group: edit
+title: Add a function to a file
+tools_named: true
+prompt: |
+  Use the edit_file tool to add a function shout(text) at the end of src/shelf/utils.py.
+  It must return the text in upper case followed by an exclamation mark, so shout('hi') returns 'HI!'.
+expect:
+  calls:
+    - tool: edit_file
+      args: {path: src/shelf/utils.py}
+  command:
+    - argv: [python, -c, "import sys; sys.path.insert(0, 'src'); from shelf.utils import shout; assert shout('hi') == 'HI!'"]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: src/shelf/utils.py}}
+  - calls:
+      - tool: edit_file
+        args:
+          path: src/shelf/utils.py
+          old_text: "    return len(isbn) == 13 and isbn.isdigit()"
+          new_text: "    return len(isbn) == 13 and isbn.isdigit()\n\n\ndef shout(text: str) -> str:\n    return text.upper() + \"!\""
+  - final: Added shout() to src/shelf/utils.py.

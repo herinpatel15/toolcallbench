@@ -1,0 +1,15 @@
+id: run-01
+group: run
+title: Run the tests and count failures
+tools_named: true
+prompt: |
+  Use the run_command tool to run `python -m pytest -q` and tell me how many tests fail.
+expect:
+  calls:
+    - tool: run_command
+      args: {command: {contains: pytest}}
+  answer_regex: ['\b2\b|two']
+reference:
+  - calls:
+      - {tool: run_command, args: {command: "python -m pytest -q"}}
+  - final: 2 tests fail.

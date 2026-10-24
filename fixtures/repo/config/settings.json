@@ -1,0 +1,7 @@
+{
+  "loan_days": 14,
+  "max_loans_per_member": 3,
+  "late_fee_per_day": 0.25,
+  "max_late_fee": 10.0,
+  "currency": "USD"
+}

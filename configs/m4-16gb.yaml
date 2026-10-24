@@ -1,0 +1,21 @@
+# Benchmark plan for a MacBook M4 with 16 GB of unified memory.
+# Start the server first:  scripts/serve_ollama.sh
+# Then:                    toolcallbench run --config configs/m4-16gb.yaml
+backend: ollama
+host: http://localhost:11434
+settings:
+  num_ctx: 16384      # about 12 GB of the 16 GB can be used by the GPU, so keep the context moderate
+  temperature: 0.0
+  seed: 42
+  repeats: 3
+  max_calls: 12
+  max_turns: 10
+  request_timeout: 300
+declared_server:      # what scripts/serve_ollama.sh starts; recorded in the report, not enforced
+  kv_cache_type: q8_0
+  flash_attention: true
+models:
+  - name: qwen3:8b
+    think: false     # Qwen3 thinks by default, which is slow. Remove this line to test it with thinking on.
+  - llama3.1:8b
+  - qwen2.5:7b

@@ -1,0 +1,15 @@
+id: read-02
+group: read
+title: List a directory
+tools_named: true
+prompt: |
+  Use the list_dir tool to list the folder src/shelf and tell me which Python files it contains.
+expect:
+  calls:
+    - tool: list_dir
+      args: {path: src/shelf}
+  answer_contains: [catalog.py, loans.py, fees.py, utils.py]
+reference:
+  - calls:
+      - {tool: list_dir, args: {path: src/shelf}}
+  - final: "src/shelf contains __init__.py, catalog.py, fees.py, loans.py, models.py, settings.py and utils.py."

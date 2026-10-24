@@ -1,0 +1,15 @@
+id: run-03
+group: run
+title: Run a shell-style listing
+tools_named: true
+prompt: |
+  Use the run_command tool to run `ls data` and tell me the names of the files in that folder.
+expect:
+  calls:
+    - tool: run_command
+      args: {command: {contains: ls}}
+  answer_contains: [books.csv, members.csv]
+reference:
+  - calls:
+      - {tool: run_command, args: {command: "ls data"}}
+  - final: The data folder has books.csv and members.csv.

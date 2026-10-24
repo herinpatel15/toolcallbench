@@ -1,0 +1,17 @@
+# Same model at two quantization levels: how much tool-calling accuracy does Q4 give up?
+# Pull the tags first (check the exact names on https://ollama.com/library/qwen3/tags):
+#   ollama pull qwen3:8b-q4_K_M
+#   ollama pull qwen3:8b-q8_0
+# A Q8_0 8B model is about 9 GB, so keep num_ctx at 8192 to 16384 on a 16 GB Mac.
+backend: ollama
+settings:
+  num_ctx: 8192
+  temperature: 0.0
+  seed: 42
+  repeats: 3
+declared_server:
+  kv_cache_type: q8_0
+  flash_attention: true
+models:
+  - qwen3:8b-q4_K_M
+  - qwen3:8b-q8_0

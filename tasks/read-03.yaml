@@ -1,0 +1,16 @@
+id: read-03
+group: read
+title: Find a definition with grep
+tools_named: true
+prompt: |
+  Use the grep tool to find where the function late_fee is defined. Tell me the file and the line number.
+expect:
+  calls:
+    - tool: grep
+      args: {pattern: {contains: late_fee}}
+  answer_contains: [fees.py]
+  answer_regex: ['\b12\b']
+reference:
+  - calls:
+      - {tool: grep, args: {pattern: "def late_fee"}}
+  - final: late_fee is defined in src/shelf/fees.py at line 12.

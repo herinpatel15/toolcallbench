@@ -1,0 +1,38 @@
+id: chain-04
+group: chain
+title: Fix both failing tests
+prompt: |
+  Two tests in this repository fail. Fix the code so that the whole test suite passes,
+  and run the suite at the end to confirm.
+expect:
+  calls:
+    - tool: [edit_file, apply_patch]
+      args: {path: src/shelf/catalog.py}
+    - tool: [edit_file, apply_patch]
+      args: {path: src/shelf/fees.py}
+    - tool: run_command
+      args: {command: {contains: pytest}}
+  min_calls: 3
+  max_calls: 10
+  command:
+    - argv: [python, -m, pytest, -q]
+reference:
+  - calls:
+      - {tool: run_command, args: {command: "python -m pytest -q"}}
+  - calls:
+      - {tool: read_file, args: {path: src/shelf/catalog.py}}
+      - {tool: read_file, args: {path: src/shelf/fees.py}}
+  - calls:
+      - tool: edit_file
+        args:
+          path: src/shelf/catalog.py
+          old_text: "    return [b for b in books if query in b.title]"
+          new_text: "    needle = query.lower()\n    return [b for b in books if needle in b.title.lower()]"
+      - tool: edit_file
+        args:
+          path: src/shelf/fees.py
+          old_text: "    return round(days * per_day, 2)"
+          new_text: "    fee = round(days * per_day, 2)\n    if cap is not None:\n        fee = min(fee, cap)\n    return fee"
+  - calls:
+      - {tool: run_command, args: {command: "python -m pytest -q"}}
+  - final: Fixed the title search and the late-fee cap; all tests pass.

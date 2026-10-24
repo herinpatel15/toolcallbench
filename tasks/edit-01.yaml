@@ -1,0 +1,23 @@
+id: edit-01
+group: edit
+title: Change one config value
+tools_named: true
+prompt: |
+  Use the edit_file tool to change loan_days in config/settings.json from 14 to 21.
+expect:
+  calls:
+    - tool: edit_file
+      args: {path: config/settings.json}
+  final_files:
+    config/settings.json:
+      contains: ['"loan_days": 21']
+      not_contains: ['"loan_days": 14']
+  command:
+    - argv: [python, -c, "import json; json.load(open('config/settings.json'))"]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: config/settings.json}}
+  - calls:
+      - tool: edit_file
+        args: {path: config/settings.json, old_text: '"loan_days": 14', new_text: '"loan_days": 21'}
+  - final: Changed loan_days to 21.

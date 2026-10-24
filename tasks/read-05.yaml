@@ -1,0 +1,16 @@
+id: read-05
+group: read
+title: Read members and count them
+tools_named: true
+prompt: |
+  Use the read_file tool on data/members.csv. How many members are there, and who joined most recently?
+expect:
+  calls:
+    - tool: read_file
+      args: {path: data/members.csv}
+  answer_contains: [Chen Wei]
+  answer_regex: ['\b3\b|three']
+reference:
+  - calls:
+      - {tool: read_file, args: {path: data/members.csv}}
+  - final: There are 3 members. Chen Wei joined most recently (2023-01-20).

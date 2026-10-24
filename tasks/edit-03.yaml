@@ -1,0 +1,32 @@
+id: edit-03
+group: edit
+title: Change a value with a unified diff
+tools_named: true
+prompt: |
+  Use the apply_patch tool (not edit_file) to change late_fee_per_day in config/settings.json from 0.25 to 0.5.
+  Read the file first if you need its exact text.
+expect:
+  calls:
+    - tool: apply_patch
+  forbidden_tools: [edit_file]
+  final_files:
+    config/settings.json:
+      contains: ['"late_fee_per_day": 0.5']
+      not_contains: ['0.25']
+  command:
+    - argv: [python, -c, "import json; json.load(open('config/settings.json'))"]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: config/settings.json}}
+  - calls:
+      - tool: apply_patch
+        args:
+          patch: |
+            --- a/config/settings.json
+            +++ b/config/settings.json
+            @@ -3,3 +3,3 @@
+               "max_loans_per_member": 3,
+            -  "late_fee_per_day": 0.25,
+            +  "late_fee_per_day": 0.5,
+               "max_late_fee": 10.0,
+  - final: Changed late_fee_per_day to 0.5.

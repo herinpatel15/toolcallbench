@@ -1,0 +1,27 @@
+id: chain-01
+group: chain
+title: Fix the title search and confirm with tests
+prompt: |
+  The test test_search_is_case_insensitive fails. Find the bug in the code and fix it,
+  then run the tests in tests/test_catalog.py to confirm that they pass.
+expect:
+  calls:
+    - tool: [edit_file, apply_patch]
+      args: {path: src/shelf/catalog.py}
+    - tool: run_command
+      args: {command: {contains: pytest}}
+  ordered: true
+  command:
+    - argv: [python, -m, pytest, -q, tests/test_catalog.py]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: src/shelf/catalog.py}}
+  - calls:
+      - tool: edit_file
+        args:
+          path: src/shelf/catalog.py
+          old_text: "    return [b for b in books if query in b.title]"
+          new_text: "    needle = query.lower()\n    return [b for b in books if needle in b.title.lower()]"
+  - calls:
+      - {tool: run_command, args: {command: "python -m pytest -q tests/test_catalog.py"}}
+  - final: Fixed search_by_title to ignore case; the catalog tests pass.

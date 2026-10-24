@@ -1,0 +1,6 @@
+# No model needed: replays the reference solutions. Proves the harness works end to end.
+backend: scripted
+settings:
+  repeats: 1
+models:
+  - scripted-oracle

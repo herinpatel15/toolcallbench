@@ -1,0 +1,15 @@
+id: read-01
+group: read
+title: Read one config value
+tools_named: true
+prompt: |
+  Use the read_file tool to read config/settings.json and tell me the value of loan_days.
+expect:
+  calls:
+    - tool: read_file
+      args: {path: config/settings.json}
+  answer_regex: ['\b14\b']
+reference:
+  - calls:
+      - {tool: read_file, args: {path: config/settings.json}}
+  - final: loan_days is 14.

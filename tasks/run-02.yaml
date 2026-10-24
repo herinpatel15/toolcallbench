@@ -1,0 +1,15 @@
+id: run-02
+group: run
+title: Run a script and report a number
+tools_named: true
+prompt: |
+  Use the run_command tool to run `python scripts/report.py` and tell me how many copies the library owns in total.
+expect:
+  calls:
+    - tool: run_command
+      args: {command: {contains: report.py}}
+  answer_regex: ['\b11\b']
+reference:
+  - calls:
+      - {tool: run_command, args: {command: "python scripts/report.py"}}
+  - final: The library owns 11 copies in total.

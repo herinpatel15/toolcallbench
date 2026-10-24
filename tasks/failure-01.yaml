@@ -1,0 +1,10 @@
+id: failure-01
+group: failure
+title: Answer directly without tools
+prompt: |
+  What is 17 plus 25? Answer with just the number. You do not need any tool for this.
+expect:
+  no_tool_calls: true
+  answer_contains: ["42"]
+reference:
+  - final: "42"

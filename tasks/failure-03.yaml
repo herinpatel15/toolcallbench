@@ -1,0 +1,20 @@
+id: failure-03
+group: failure
+title: Recover from a missing file
+prompt: |
+  Read config/settings.yaml and tell me which currency the library uses.
+  If that file does not exist, find the right file yourself.
+expect:
+  calls:
+    - tool: read_file
+      args: {path: config/settings.json}
+  min_calls: 2
+  answer_contains: [USD]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: config/settings.yaml}}
+  - calls:
+      - {tool: list_dir, args: {path: config}}
+  - calls:
+      - {tool: read_file, args: {path: config/settings.json}}
+  - final: The currency is USD (from config/settings.json).

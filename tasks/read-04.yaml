@@ -1,0 +1,15 @@
+id: read-04
+group: read
+title: Read a CSV and answer a question
+tools_named: true
+prompt: |
+  Use the read_file tool on data/books.csv. Which book has the most copies?
+expect:
+  calls:
+    - tool: read_file
+      args: {path: data/books.csv}
+  answer_contains: [Hobbit]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: data/books.csv}}
+  - final: The Hobbit has the most copies (3).
