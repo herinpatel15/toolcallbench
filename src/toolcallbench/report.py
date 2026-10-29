@@ -10,6 +10,15 @@ from .checks import FAILURE_TYPES
 from .models import GROUPS
 from .store import Store
 
+# Groups of failure types, by what to fix. Every type in checks.FAILURE_TYPES belongs to exactly one group.
+FAILURE_FAMILIES = {
+    "Wrong tool": ["unknown_tool", "wrong_tool", "too_few_calls", "unneeded_call", "not_parallel"],
+    "Bad arguments": ["invalid_json", "invalid_args", "wrong_args"],
+    "No real call": ["no_call", "text_tool_call"],
+    "Over budget": ["call_limit"],
+    "Wrong result": ["patch_failed", "outcome_mismatch"],
+}
+
 SETTING_LABELS = [
     ("backend", "Backend"),
     ("backend_version", "Backend version"),
@@ -124,6 +133,20 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
         )
     out += _table(header, rows)
 
+    seen_types = [t for t in FAILURE_TYPES if any(t in m["failures"] for m in models)]
+    out += ["", "## Why runs failed", ""]
+    if seen_types:
+        out += ["Read this next to the pass rate: each kind of failure needs a different fix.", ""]
+        fam_names = list(FAILURE_FAMILIES)
+        out += _table(
+            ["Model"] + fam_names,
+            [[m["model"]] + [str(sum(m["failures"].get(t, 0) for t in FAILURE_FAMILIES[f])) for f in fam_names] for m in models],
+        )
+        out += ["", "Every failure type, in detail:", ""]
+        out += _table(["Model"] + seen_types, [[m["model"]] + [str(m["failures"].get(t, 0)) for t in seen_types] for m in models])
+    else:
+        out.append("No failures.")
+
     out += ["", "## Where the time went", "", "Medians per task. A dash means the server did not report that number.", ""]
     rows = []
     for m in models:
@@ -132,13 +155,6 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
             + [_fmt(m["out_tokens"], 0), _fmt(m["prompt_tokens"] or None, 0)]
         )
     out += _table(["Model", "s/task", "Generating s", "Reading prompt s", "Loading s", "Output tokens", "Prompt tokens"], rows)
-
-    seen_types = [t for t in FAILURE_TYPES if any(t in m["failures"] for m in models)]
-    out += ["", "## Failure types", ""]
-    if seen_types:
-        out += _table(["Model"] + seen_types, [[m["model"]] + [str(m["failures"].get(t, 0)) for t in seen_types] for m in models])
-    else:
-        out.append("No failures.")
 
     out += ["", "## Per-task results", "", "Each cell is passed runs / scored runs.", ""]
     task_ids = sorted({r["task_id"] for r in runs})

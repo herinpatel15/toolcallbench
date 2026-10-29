@@ -77,7 +77,8 @@ Key `run` options: `--config FILE`, `--backend ollama|openai-compat|scripted`, `
 - **Settings** table: compare two reports only if these match.
 - **Summary**: pass rate overall and per group, median tokens per second, median seconds per task, and calls versus the reference (1.00 is ideal; 2.00 means twice as many calls).
 - **Errors**: runs where the server failed. They are not in the pass rate.
-- **Failure types**: why runs failed. A model with many `invalid_json` failures has a formatting problem; many `no_call` means it answers from memory instead of using tools; many `outcome_mismatch` means it calls tools but reaches wrong results.
+- **Why runs failed**: right after the summary. Failures are grouped into wrong tool, bad arguments, no real call, over budget and wrong result, then listed by exact type. Each group needs a different fix, so read it together with the pass rate.
+- **Failure types**: the exact types. A model with many `invalid_json` failures has a formatting problem; many `no_call` means it answers from memory instead of using tools; many `outcome_mismatch` means it calls tools but reaches wrong results.
 - **Per-task results**: cells are passed/scored. With 3 repeats, `1/3` is a flaky task, not a hard failure.
 
 ## Compare quantization levels

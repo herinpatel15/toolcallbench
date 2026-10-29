@@ -106,3 +106,18 @@ def test_read_only_run_has_an_empty_diff(tasks, fixture_dir):
     task = next(t for t in tasks if t.id == "read-01")
     record = run_once(task, ScriptedBackend(tasks, "oracle"), fixture_dir)
     assert record.transcript.final_diff == ""
+
+
+def test_every_failure_type_is_in_exactly_one_family():
+    from toolcallbench.checks import FAILURE_TYPES
+    from toolcallbench.report import FAILURE_FAMILIES
+
+    listed = [t for types in FAILURE_FAMILIES.values() for t in types]
+    assert sorted(listed) == sorted(FAILURE_TYPES)
+
+
+def test_report_shows_failure_families_right_after_the_summary(tmp_path, tasks, fixture_dir):
+    store = _store_with_runs(tmp_path, tasks, fixture_dir, profile="no_call", ids=("read-01", "edit-01"))
+    md = render_markdown(store, "s1", {t.id: (t.group, t.title) for t in tasks})
+    assert md.index("## Summary") < md.index("## Why runs failed") < md.index("## Where the time went")
+    assert "No real call" in md and "Wrong tool" in md
