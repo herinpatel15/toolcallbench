@@ -69,6 +69,11 @@ def aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
                 "tok_per_s": _median([r["tok_per_s"] for r in scored if r["tok_per_s"]]),
                 "seconds": _median([r["wall_seconds"] for r in scored]),
                 "efficiency": _median([r["efficiency"] for r in scored if r["efficiency"] is not None]),
+                "out_tokens": _median([r["eval_tokens"] for r in scored]),
+                "prompt_tokens": _median([r["prompt_tokens"] for r in scored]),
+                "gen_seconds": _median([r["eval_seconds"] for r in scored]),
+                "prompt_seconds": _median([r["prompt_seconds"] for r in scored]),
+                "load_seconds": _median([r["load_seconds"] for r in scored]),
             }
         )
     return {"models": models}
@@ -118,6 +123,15 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
             + [_fmt(m["tok_per_s"]), _fmt(m["seconds"]), _fmt(m["efficiency"], 2)]
         )
     out += _table(header, rows)
+
+    out += ["", "## Where the time went", "", "Medians per task. A dash means the server did not report that number.", ""]
+    rows = []
+    for m in models:
+        rows.append(
+            [m["model"], _fmt(m["seconds"]), _fmt(m["gen_seconds"]), _fmt(m["prompt_seconds"] or None), _fmt(m["load_seconds"] or None)]
+            + [_fmt(m["out_tokens"], 0), _fmt(m["prompt_tokens"] or None, 0)]
+        )
+    out += _table(["Model", "s/task", "Generating s", "Reading prompt s", "Loading s", "Output tokens", "Prompt tokens"], rows)
 
     seen_types = [t for t in FAILURE_TYPES if any(t in m["failures"] for m in models)]
     out += ["", "## Failure types", ""]
