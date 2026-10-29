@@ -93,4 +93,5 @@ class OpenAICompatBackend(Backend):
             eval_tokens=int(usage.get("completion_tokens") or 0),
             eval_seconds=eval_seconds,
             prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            prompt_seconds=float(timings.get("prompt_ms") or 0) / 1000,
         )

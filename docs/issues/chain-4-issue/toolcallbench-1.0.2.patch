@@ -1,0 +1,522 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bece1da..d604534 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -3,6 +3,14 @@
+ All notable changes to this project are recorded here. The format follows
+ [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic versioning.
+ 
++## [1.0.2] - 2026-10-29
++
++### Added
++- Each run now records prompt tokens, time spent reading the prompt and model load time (Ollama; llama.cpp servers report prompt time when they send `timings`). Older result databases are upgraded in place.
++- The report has a "Where the time went" table: seconds per task split into generating, reading the prompt and loading, plus output and prompt tokens. It shows whether a model is slow because it writes a lot or because the context grows.
++- When a run fails with `call_limit`, its log now says how many calls and turns were used, what the task allows, and whether the final repository was correct. This separates "too many calls" from "wrong fix".
++- Each run log now ends with `final_diff`, the unified diff of the repository the model left behind. Failed runs can be inspected after the fact, for example to run the tests against what a model produced.
++
+ ## [1.0.1] - 2026-10-24
+ 
+ ### Fixed
+diff --git a/docs/TRIAGE_chain-04_and_timing.md b/docs/TRIAGE_chain-04_and_timing.md
+new file mode 100644
+index 0000000..864e8cf
+--- /dev/null
++++ b/docs/TRIAGE_chain-04_and_timing.md
+@@ -0,0 +1,86 @@
++# Two reader questions: chain-04 and gemma's speed
++
++A reader on dev.to read the first results post and asked two things. This note records what they said, what is true, what the code does, and what changed in v1.0.2.
++
++## What the comment said
++
++1. Scoring on the end state of the repo is the right call. Since all four models failed chain-04, take each model's final repo and run the shelf tests on it.
++   - If some pass the tests but are marked `outcome_mismatch`, the check is too strict (it compares against one expected diff).
++   - If none pass, the task is genuinely hard, or the two bugs interact.
++2. gemma4:e4b is slowest per task although its tok/s is higher than the 8B models. tok/s is only the generation rate. Per-task time also depends on how many tokens are generated and on prompt processing, which grows as tool results pile up. Log `eval_count` and `prompt_eval_duration` per task.
++
++## Question 1: chain-04
++
++### What is true
++- **The outcome check is not a diff comparison.** For chain-04 it runs `python -m pytest -q` on the final repository (`expect.command` in `tasks/chain-04.yaml`). Any valid fix passes that part. So the "too strict diff" worry does not apply to the outcome check.
++- **There is a second, separate check on the tool calls** (`expect.calls`): an edit to `catalog.py`, an edit to `fees.py`, and a `run_command` containing `pytest`, with `max_calls: 10`. A model can fix the bugs and still fail this check.
++- **The report's own numbers point at the call budget.** gemma4:e4b failed exactly one task in the whole run: chain-04. Its only failure type was `call_limit`. So for gemma, chain-04 was not a wrong fix and not an outcome mismatch.
++
++### What was not known (and still is, until you run the query)
++Whether the other three models also hit the limit, or really did not fix the code.
++
++### Two details that make `call_limit` easy to misread
++- `call_limit` is reported when a run hits **either** the call limit **or** the turn limit (`hit_limit` covers both).
++- Three different numbers apply: the run-wide `max_calls` (12 by default), `max_turns` (10 by default), and the task's own `max_calls` (10 for chain-04). The task value overrides the command-line value in the check, so `--max-calls 20` does **not** loosen chain-04. You have to change `src/toolcallbench/data/tasks/chain-04.yaml`.
++- The reference solution needs about 6 calls (run, read, read, edit, edit, run). A model that also lists the directory or searches first gets close to 10 quickly.
++
++### A real gap the comment exposed
++The runner deleted its temporary repository after each run, so "take each model's final repo" was not possible. Fixed in v1.0.2 (below).
++
++### How to triage, step by step
++1. Ask the database what happened to each model:
++   ```bash
++   sqlite3 results/results.sqlite \
++     "select model, failure_type, outcome_ok, calls_made, turns from runs where task_id='chain-04';"
++   ```
++   - `call_limit` and `outcome_ok = 1`: the model fixed the code but used too many calls. The budget is too tight.
++   - `call_limit` and `outcome_ok = 0`: it ran out of calls before finishing. Look at its call list in the log to see whether it wandered.
++   - `outcome_mismatch` or `patch_failed`: it did not fix the code.
++2. For runs made with v1.0.2 or later, rebuild what the model left behind and run the tests on it:
++   ```bash
++   python scripts/replay_final_repo.py results/logs/<session>/<model>/chain-04_1.jsonl
++   ```
++   It prints the recorded failure reason and then `tests PASS` or `tests FAIL` for the model's final repo.
++   Runs from older versions have no saved diff; rerun chain-04 (`--tasks chain-04`).
++3. Decide:
++   - Tests pass but the run is marked failed: the check is too strict. Loosen `expect.calls` or the budget.
++   - Tests fail for every model: the task is hard, or the two bugs interact. Read the transcripts.
++
++### What to do about the task (after step 1)
++Do not change the task before looking at the data. If the cause is the budget, raise `max_calls` for chain-04 (and check chain-01, which also failed for three models), note it in the changelog, and rerun. A changed task is a new task version, so old and new results should not be compared as if they were the same.
++
++## Question 2: why is gemma slow per task?
++
++### What is true
++tok/s is generation speed only. Wall time per task = generating + reading the prompt + model load + tool execution. A model that writes more before each call, or that makes more calls so the context grows, takes longer even with a higher tok/s.
++
++### What the tool recorded before v1.0.2
++Output tokens and generation seconds per run (`eval_tokens`, `eval_seconds`). It did **not** record prompt tokens, prompt-reading time or load time. So you could see output length but not prompt cost.
++
++### What changed in v1.0.2
++- Per run, the database now stores `prompt_tokens`, `prompt_seconds` and `load_seconds` (Ollama; llama.cpp servers report prompt time if they send `timings`). Old databases are upgraded in place.
++- The report has a **"Where the time went"** table: s/task, generating s, reading prompt s, loading s, output tokens, prompt tokens (medians).
++
++### How to read it
++- Large "Output tokens" for gemma: it reasons or writes a lot before each call.
++- Large "Reading prompt s": the growing context is the cost.
++- Large "Loading s": the model was reloaded between runs; check `keep_alive` and memory pressure.
++Do not guess the cause until the table is filled from a real run.
++
++## Suggested reply to the commenter
++
++> Thanks, this is really useful.
++>
++> On chain-04: the outcome check doesn't compare against one expected diff. It runs the real test suite on the final repo, so any valid fix passes that part. There's also a separate tool-call check (edits to both files, a pytest run, max 10 calls). gemma's only failure in my whole run was a `call_limit`, so I suspect chain-04 is hitting the call budget, not a wrong fix. I haven't confirmed that for all four models yet, and I'll check each model's final repo before I change the task.
++>
++> On speed: agreed, tok/s is only the generation rate. The DB already stored output tokens per run; I've now added prompt tokens, prompt-reading time and load time (v1.0.2), plus a "where the time went" table in the report. I'll share the numbers after a rerun with 3 repeats.
++
++Edit the last paragraph so it matches what you have actually published and run when you post it.
++
++## Checklist
++- [ ] Run the sqlite query above on your existing results.
++- [ ] Apply the v1.0.2 patch, run the tests, publish 1.0.2.
++- [ ] Rerun with `repeats: 3` (at least chain-01 and chain-04, plus the full run for the table).
++- [ ] Use `replay_final_repo.py` on the chain-04 logs.
++- [ ] Decide on the chain-04 budget from the data; record it in the changelog.
++- [ ] Reply to the comment with the real numbers.
+diff --git a/scripts/replay_final_repo.py b/scripts/replay_final_repo.py
+new file mode 100755
+index 0000000..e839f6e
+--- /dev/null
++++ b/scripts/replay_final_repo.py
+@@ -0,0 +1,61 @@
++#!/usr/bin/env python3
++"""Rebuild the repository a model left behind and run its tests.
++
++Usage:  python scripts/replay_final_repo.py results/logs/<session>/<model>/chain-04_1.jsonl [--fixture DIR]
++
++It copies the fixture repository, applies the `final_diff` saved at the end of the run log, then runs
++`python -m pytest -q` in the copy. Use it to tell "the model fixed it but the check was too strict"
++(tests pass) from "the model did not fix it" (tests fail).
++"""
++from __future__ import annotations
++
++import argparse
++import json
++import shutil
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
++
++
++def default_fixture() -> Path:
++    here = Path(__file__).resolve().parents[1]
++    for candidate in (here / "src" / "toolcallbench" / "data" / "fixtures" / "repo", here / "fixtures" / "repo"):
++        if candidate.is_dir():
++            return candidate
++    raise SystemExit("could not find the fixture repository; pass --fixture")
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    parser.add_argument("log", type=Path, help="a run log (.jsonl) written by toolcallbench")
++    parser.add_argument("--fixture", type=Path, help="fixture repository (default: the one shipped with the package)")
++    args = parser.parse_args()
++
++    summary = json.loads(args.log.read_text(encoding="utf-8").splitlines()[-1])
++    if summary.get("type") != "summary" or "final_diff" not in summary:
++        raise SystemExit("this log has no final_diff; it was written by an older version. Rerun the task with toolcallbench >= 1.0.2.")
++    print(f"task {summary['task']}: recorded result = {summary['failure_type']}")
++    for line in summary.get("details", []):
++        print(f"  {line}")
++
++    fixture = args.fixture or default_fixture()
++    with tempfile.TemporaryDirectory(prefix="tcb-replay-") as tmp:
++        repo = Path(tmp) / "repo"
++        shutil.copytree(fixture, repo, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc"))
++        diff = summary["final_diff"]
++        if diff.strip():
++            applied = subprocess.run(["patch", "-p1", "--quiet"], input=diff, text=True, cwd=repo, capture_output=True)
++            if applied.returncode != 0:
++                print("could not apply the saved diff:\n" + applied.stdout + applied.stderr)
++                return 2
++        else:
++            print("the model did not change any file")
++        tests = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=repo, text=True, capture_output=True)
++        print(tests.stdout.strip().splitlines()[-1] if tests.stdout.strip() else tests.stderr.strip())
++        print("tests PASS on the model's final repo" if tests.returncode == 0 else "tests FAIL on the model's final repo")
++        return 0 if tests.returncode == 0 else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/src/toolcallbench/__init__.py b/src/toolcallbench/__init__.py
+index 4e5aa5d..2eeb0ae 100644
+--- a/src/toolcallbench/__init__.py
++++ b/src/toolcallbench/__init__.py
+@@ -1,3 +1,3 @@
+ """ToolCallBench: measure how reliably local LLMs call tools on your own repo and hardware."""
+ 
+-__version__ = "1.0.1"
++__version__ = "1.0.2"
+diff --git a/src/toolcallbench/backends/ollama.py b/src/toolcallbench/backends/ollama.py
+index de807ad..13671ab 100644
+--- a/src/toolcallbench/backends/ollama.py
++++ b/src/toolcallbench/backends/ollama.py
+@@ -83,4 +83,6 @@ class OllamaBackend(Backend):
+             eval_tokens=int(data.get("eval_count") or 0),
+             eval_seconds=float(data.get("eval_duration") or 0) / 1e9,
+             prompt_tokens=int(data.get("prompt_eval_count") or 0),
++            prompt_seconds=float(data.get("prompt_eval_duration") or 0) / 1e9,
++            load_seconds=float(data.get("load_duration") or 0) / 1e9,
+         )
+diff --git a/src/toolcallbench/backends/openai_compat.py b/src/toolcallbench/backends/openai_compat.py
+index 2e2ce62..a6a3c7e 100644
+--- a/src/toolcallbench/backends/openai_compat.py
++++ b/src/toolcallbench/backends/openai_compat.py
+@@ -93,4 +93,5 @@ class OpenAICompatBackend(Backend):
+             eval_tokens=int(usage.get("completion_tokens") or 0),
+             eval_seconds=eval_seconds,
+             prompt_tokens=int(usage.get("prompt_tokens") or 0),
++            prompt_seconds=float(timings.get("prompt_ms") or 0) / 1000,
+         )
+diff --git a/src/toolcallbench/checks.py b/src/toolcallbench/checks.py
+index bd004c2..4eb8290 100644
+--- a/src/toolcallbench/checks.py
++++ b/src/toolcallbench/checks.py
+@@ -192,6 +192,12 @@ def evaluate(task: Task, tr: Transcript, root: Path, fixture_dir: Path, default_
+ 
+     # Outcome: the answer text and the final state of the repository.
+     outcome_ok = _check_outcome(task, tr, root, fixture_dir, details)
++    if tool_type == "call_limit":
++        # Say what was hit and whether the work was actually done, so a "too strict" budget is easy to spot.
++        details.append(
++            f"limit: {len(calls)} calls in {tr.turns} turns (this task allows {max_calls} calls); "
++            f"final repo state was {'correct' if outcome_ok else 'wrong'}"
++        )
+ 
+     if not parse_ok:
+         failure = parse_type
+diff --git a/src/toolcallbench/models.py b/src/toolcallbench/models.py
+index 23c7a70..630d4c7 100644
+--- a/src/toolcallbench/models.py
++++ b/src/toolcallbench/models.py
+@@ -38,6 +38,8 @@ class BackendResponse:
+     eval_tokens: int = 0
+     eval_seconds: float = 0.0
+     prompt_tokens: int = 0
++    prompt_seconds: float = 0.0  # time spent reading the prompt (0 when the server does not report it)
++    load_seconds: float = 0.0  # time spent loading the model into memory (Ollama only)
+ 
+ 
+ @dataclass
+@@ -64,7 +66,11 @@ class Transcript:
+     text_tool_call: bool = False
+     eval_tokens: int = 0
+     eval_seconds: float = 0.0
++    prompt_tokens: int = 0
++    prompt_seconds: float = 0.0
++    load_seconds: float = 0.0
+     wall_seconds: float = 0.0
++    final_diff: str = ""  # unified diff of the repository the model left behind, against the starting fixture
+ 
+ 
+ @dataclass
+diff --git a/src/toolcallbench/report.py b/src/toolcallbench/report.py
+index 233e768..9c6a95d 100644
+--- a/src/toolcallbench/report.py
++++ b/src/toolcallbench/report.py
+@@ -69,6 +69,11 @@ def aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
+                 "tok_per_s": _median([r["tok_per_s"] for r in scored if r["tok_per_s"]]),
+                 "seconds": _median([r["wall_seconds"] for r in scored]),
+                 "efficiency": _median([r["efficiency"] for r in scored if r["efficiency"] is not None]),
++                "out_tokens": _median([r["eval_tokens"] for r in scored]),
++                "prompt_tokens": _median([r["prompt_tokens"] for r in scored]),
++                "gen_seconds": _median([r["eval_seconds"] for r in scored]),
++                "prompt_seconds": _median([r["prompt_seconds"] for r in scored]),
++                "load_seconds": _median([r["load_seconds"] for r in scored]),
+             }
+         )
+     return {"models": models}
+@@ -119,6 +124,15 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
+         )
+     out += _table(header, rows)
+ 
++    out += ["", "## Where the time went", "", "Medians per task. A dash means the server did not report that number.", ""]
++    rows = []
++    for m in models:
++        rows.append(
++            [m["model"], _fmt(m["seconds"]), _fmt(m["gen_seconds"]), _fmt(m["prompt_seconds"] or None), _fmt(m["load_seconds"] or None)]
++            + [_fmt(m["out_tokens"], 0), _fmt(m["prompt_tokens"] or None, 0)]
++        )
++    out += _table(["Model", "s/task", "Generating s", "Reading prompt s", "Loading s", "Output tokens", "Prompt tokens"], rows)
++
+     seen_types = [t for t in FAILURE_TYPES if any(t in m["failures"] for m in models)]
+     out += ["", "## Failure types", ""]
+     if seen_types:
+diff --git a/src/toolcallbench/runner.py b/src/toolcallbench/runner.py
+index b2b5143..6f48c6c 100644
+--- a/src/toolcallbench/runner.py
++++ b/src/toolcallbench/runner.py
+@@ -1,6 +1,7 @@
+ """Run one task against one backend: converse, execute tools in a throwaway repo copy, then score."""
+ from __future__ import annotations
+ 
++import difflib
+ import re
+ import shutil
+ import tempfile
+@@ -52,6 +53,9 @@ def converse(task: Task, backend: Backend, executor: ToolExecutor, tr: Transcrip
+         tr.turns = turn
+         tr.eval_tokens += response.eval_tokens
+         tr.eval_seconds += response.eval_seconds
++        tr.prompt_tokens += response.prompt_tokens
++        tr.prompt_seconds += response.prompt_seconds
++        tr.load_seconds += response.load_seconds
+         assistant: dict = {"role": "assistant", "content": response.content}
+         if response.tool_calls:
+             assistant["tool_calls"] = [
+@@ -73,6 +77,33 @@ def converse(task: Task, backend: Backend, executor: ToolExecutor, tr: Transcrip
+     tr.hit_limit = True
+ 
+ 
++_SKIP_DIRS = {"__pycache__", ".pytest_cache"}
++
++
++def repo_diff(before: Path, after: Path, limit: int = 20000) -> str:
++    """Unified diff of what the model changed. Saved in the run log so a failed run can be inspected later."""
++
++    def files(base: Path) -> dict[str, Path]:
++        return {
++            p.relative_to(base).as_posix(): p
++            for p in sorted(base.rglob("*"))
++            if p.is_file() and not (_SKIP_DIRS & set(p.relative_to(base).parts)) and p.suffix != ".pyc"
++        }
++
++    old, new = files(before), files(after)
++    chunks: list[str] = []
++    for rel in sorted(old.keys() | new.keys()):
++        try:
++            a = old[rel].read_text(encoding="utf-8").splitlines(keepends=True) if rel in old else []
++            b = new[rel].read_text(encoding="utf-8").splitlines(keepends=True) if rel in new else []
++        except UnicodeDecodeError:
++            continue
++        if a != b:
++            chunks.append("".join(difflib.unified_diff(a, b, f"a/{rel}", f"b/{rel}")))
++    text = "".join(chunks)
++    return text if len(text) <= limit else text[:limit] + "\n[diff cut off]\n"
++
++
+ def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int = 12, max_turns: int = 10) -> RunRecord:
+     started = time.monotonic()
+     tr = Transcript()
+@@ -86,5 +117,6 @@ def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int
+             tr.wall_seconds = time.monotonic() - started
+             return RunRecord(task, "error", str(exc), tr, None)
+         check = evaluate(task, tr, root, fixture_dir, default_max_calls=max_calls)
++        tr.final_diff = repo_diff(fixture_dir, root)
+     tr.wall_seconds = time.monotonic() - started
+     return RunRecord(task, "ok", "", tr, check)
+diff --git a/src/toolcallbench/store.py b/src/toolcallbench/store.py
+index f27aca3..7dac17c 100644
+--- a/src/toolcallbench/store.py
++++ b/src/toolcallbench/store.py
+@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS runs (
+     efficiency   REAL,
+     eval_tokens  INTEGER NOT NULL,
+     eval_seconds REAL NOT NULL,
++    prompt_tokens  INTEGER NOT NULL DEFAULT 0,
++    prompt_seconds REAL NOT NULL DEFAULT 0,
++    load_seconds   REAL NOT NULL DEFAULT 0,
+     wall_seconds REAL NOT NULL,
+     tok_per_s    REAL,
+     error        TEXT NOT NULL DEFAULT '',
+@@ -78,6 +81,19 @@ class Store:
+         self.conn = sqlite3.connect(self.path)
+         self.conn.row_factory = sqlite3.Row
+         self.conn.executescript(SCHEMA)
++        self._add_missing_columns()
++
++    def _add_missing_columns(self) -> None:
++        """Databases made by older versions lack the prompt/load timing columns; add them in place."""
++        have = {row["name"] for row in self.conn.execute("PRAGMA table_info(runs)")}
++        for name, ddl in (
++            ("prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
++            ("prompt_seconds", "REAL NOT NULL DEFAULT 0"),
++            ("load_seconds", "REAL NOT NULL DEFAULT 0"),
++        ):
++            if name not in have:
++                self.conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {ddl}")
++        self.conn.commit()
+ 
+     def close(self) -> None:
+         self.conn.close()
+@@ -147,8 +163,8 @@ class Store:
+         cursor = self.conn.execute(
+             "INSERT INTO runs (session_id, model, quant, backend, task_id, grp, repeat, status, passed, parse_ok, "
+             "tool_ok, args_ok, outcome_ok, failure_type, calls_made, turns, efficiency, eval_tokens, eval_seconds, "
+-            "wall_seconds, tok_per_s, error, log_path, created_at) "
+-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
++            "prompt_tokens, prompt_seconds, load_seconds, wall_seconds, tok_per_s, error, log_path, created_at) "
++            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (
+                 session_id,
+                 model,
+@@ -169,6 +185,9 @@ class Store:
+                 check.efficiency if check else None,
+                 tr.eval_tokens,
+                 tr.eval_seconds,
++                tr.prompt_tokens,
++                tr.prompt_seconds,
++                tr.load_seconds,
+                 tr.wall_seconds,
+                 tok_per_s,
+                 record.error,
+@@ -205,6 +224,7 @@ def write_log(results_dir: Path, session_id: str, model: str, repeat: int, recor
+         "failure_type": check.failure_type if check else "backend_error",
+         "details": check.details if check else [],
+         "final_text": tr.final_text,
++        "final_diff": tr.final_diff,
+         "calls": [
+             {
+                 "index": c.index,
+diff --git a/tests/test_timing.py b/tests/test_timing.py
+new file mode 100644
+index 0000000..10d07b0
+--- /dev/null
++++ b/tests/test_timing.py
+@@ -0,0 +1,108 @@
++import sqlite3
++
++from toolcallbench.backends.ollama import OllamaBackend
++from toolcallbench.backends.scripted import ScriptedBackend
++from toolcallbench.report import render_markdown
++from toolcallbench.runner import run_once
++from toolcallbench.store import Store, write_log
++
++
++def _store_with_runs(tmp_path, tasks, fixture_dir, profile="oracle", ids=("read-01", "chain-04")):
++    store = Store(tmp_path / "r.sqlite")
++    store.create_session("s1", {"repeats": 1, "backend": "scripted"})
++    backend = ScriptedBackend(tasks, profile)
++    for task in [t for t in tasks if t.id in ids]:
++        record = run_once(task, backend, fixture_dir)
++        log = write_log(tmp_path, "s1", "m", 1, record)
++        store.add_run("s1", model="m", quant="", backend="scripted", repeat=1, record=record, log_path=log)
++    return store
++
++
++def test_prompt_tokens_are_stored_per_run(tmp_path, tasks, fixture_dir):
++    store = _store_with_runs(tmp_path, tasks, fixture_dir)
++    rows = store.runs("s1")
++    assert all(r["prompt_tokens"] > 0 for r in rows)  # the scripted backend reports 100 per turn
++    assert {"prompt_seconds", "load_seconds"} <= set(rows[0])
++
++
++def test_report_has_a_time_breakdown(tmp_path, tasks, fixture_dir):
++    store = _store_with_runs(tmp_path, tasks, fixture_dir)
++    md = render_markdown(store, "s1", {t.id: (t.group, t.title) for t in tasks})
++    assert "## Where the time went" in md and "Reading prompt s" in md
++
++
++def test_old_database_gets_the_new_columns(tmp_path):
++    path = tmp_path / "old.sqlite"
++    conn = sqlite3.connect(path)
++    conn.executescript(
++        "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, settings_json TEXT NOT NULL);"
++        "CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, model TEXT, eval_tokens INTEGER, eval_seconds REAL, wall_seconds REAL);"
++    )
++    conn.commit()
++    conn.close()
++    store = Store(path)
++    cols = {row["name"] for row in store.conn.execute("PRAGMA table_info(runs)")}
++    assert {"prompt_tokens", "prompt_seconds", "load_seconds"} <= cols
++
++
++def test_ollama_prompt_and_load_timing_are_read(tasks):
++    reply = {
++        "message": {"role": "assistant", "content": "ok"},
++        "eval_count": 20, "eval_duration": 500_000_000,
++        "prompt_eval_count": 300, "prompt_eval_duration": 2_000_000_000, "load_duration": 1_500_000_000,
++    }
++    import json
++    import threading
++    from http.server import BaseHTTPRequestHandler, HTTPServer
++
++    class Handler(BaseHTTPRequestHandler):
++        def do_POST(self):
++            self.rfile.read(int(self.headers.get("Content-Length", 0)))
++            body = json.dumps(reply).encode()
++            self.send_response(200)
++            self.send_header("Content-Type", "application/json")
++            self.send_header("Content-Length", str(len(body)))
++            self.end_headers()
++            self.wfile.write(body)
++
++        def log_message(self, *a):
++            pass
++
++    server = HTTPServer(("127.0.0.1", 0), Handler)
++    threading.Thread(target=server.serve_forever, daemon=True).start()
++    try:
++        backend = OllamaBackend("m", host=f"http://127.0.0.1:{server.server_port}", options={}, timeout=5)
++        response = backend.chat([{"role": "user", "content": "hi"}], [])
++    finally:
++        server.shutdown()
++    assert response.prompt_tokens == 300
++    assert response.prompt_seconds == 2.0 and response.load_seconds == 1.5
++
++
++def test_call_limit_details_say_whether_the_repo_was_fixed(tmp_path, tasks, fixture_dir):
++    task = next(t for t in tasks if t.id == "chain-04")
++    backend = ScriptedBackend(tasks, "oracle")
++    record = run_once(task, backend, fixture_dir, max_calls=12)
++    assert record.check.passed  # sanity: the reference solution fits the budget
++    # Squeeze the task's own budget so the oracle exceeds it.
++    task.expect["max_calls"] = 2
++    record = run_once(task, ScriptedBackend(tasks, "oracle"), fixture_dir, max_calls=12)
++    assert record.check.failure_type == "call_limit"
++    assert any(d.startswith("limit:") and "final repo state was correct" in d for d in record.check.details)
++
++
++def test_log_keeps_the_final_repo_diff(tmp_path, tasks, fixture_dir):
++    import json
++
++    task = next(t for t in tasks if t.id == "edit-01")
++    record = run_once(task, ScriptedBackend(tasks, "oracle"), fixture_dir)
++    assert "+++ b/" in record.transcript.final_diff  # the oracle edits one file
++    log = write_log(tmp_path, "s1", "m", 1, record)
++    summary = json.loads((tmp_path / log).read_text().splitlines()[-1])
++    assert summary["final_diff"] == record.transcript.final_diff
++
++
++def test_read_only_run_has_an_empty_diff(tasks, fixture_dir):
++    task = next(t for t in tasks if t.id == "read-01")
++    record = run_once(task, ScriptedBackend(tasks, "oracle"), fixture_dir)
++    assert record.transcript.final_diff == ""

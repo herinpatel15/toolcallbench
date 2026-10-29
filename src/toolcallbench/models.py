@@ -38,6 +38,8 @@ class BackendResponse:
     eval_tokens: int = 0
     eval_seconds: float = 0.0
     prompt_tokens: int = 0
+    prompt_seconds: float = 0.0  # time spent reading the prompt (0 when the server does not report it)
+    load_seconds: float = 0.0  # time spent loading the model into memory (Ollama only)
 
 
 @dataclass
@@ -64,7 +66,11 @@ class Transcript:
     text_tool_call: bool = False
     eval_tokens: int = 0
     eval_seconds: float = 0.0
+    prompt_tokens: int = 0
+    prompt_seconds: float = 0.0
+    load_seconds: float = 0.0
     wall_seconds: float = 0.0
+    final_diff: str = ""  # unified diff of the repository the model left behind, against the starting fixture
 
 
 @dataclass

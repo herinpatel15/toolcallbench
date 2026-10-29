@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS runs (
     efficiency   REAL,
     eval_tokens  INTEGER NOT NULL,
     eval_seconds REAL NOT NULL,
+    prompt_tokens  INTEGER NOT NULL DEFAULT 0,
+    prompt_seconds REAL NOT NULL DEFAULT 0,
+    load_seconds   REAL NOT NULL DEFAULT 0,
     wall_seconds REAL NOT NULL,
     tok_per_s    REAL,
     error        TEXT NOT NULL DEFAULT '',
@@ -78,6 +81,19 @@ class Store:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._add_missing_columns()
+
+    def _add_missing_columns(self) -> None:
+        """Databases made by older versions lack the prompt/load timing columns; add them in place."""
+        have = {row["name"] for row in self.conn.execute("PRAGMA table_info(runs)")}
+        for name, ddl in (
+            ("prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("prompt_seconds", "REAL NOT NULL DEFAULT 0"),
+            ("load_seconds", "REAL NOT NULL DEFAULT 0"),
+        ):
+            if name not in have:
+                self.conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {ddl}")
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -147,8 +163,8 @@ class Store:
         cursor = self.conn.execute(
             "INSERT INTO runs (session_id, model, quant, backend, task_id, grp, repeat, status, passed, parse_ok, "
             "tool_ok, args_ok, outcome_ok, failure_type, calls_made, turns, efficiency, eval_tokens, eval_seconds, "
-            "wall_seconds, tok_per_s, error, log_path, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "prompt_tokens, prompt_seconds, load_seconds, wall_seconds, tok_per_s, error, log_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id,
                 model,
@@ -169,6 +185,9 @@ class Store:
                 check.efficiency if check else None,
                 tr.eval_tokens,
                 tr.eval_seconds,
+                tr.prompt_tokens,
+                tr.prompt_seconds,
+                tr.load_seconds,
                 tr.wall_seconds,
                 tok_per_s,
                 record.error,
@@ -205,6 +224,7 @@ def write_log(results_dir: Path, session_id: str, model: str, repeat: int, recor
         "failure_type": check.failure_type if check else "backend_error",
         "details": check.details if check else [],
         "final_text": tr.final_text,
+        "final_diff": tr.final_diff,
         "calls": [
             {
                 "index": c.index,

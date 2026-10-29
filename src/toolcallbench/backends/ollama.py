@@ -83,4 +83,6 @@ class OllamaBackend(Backend):
             eval_tokens=int(data.get("eval_count") or 0),
             eval_seconds=float(data.get("eval_duration") or 0) / 1e9,
             prompt_tokens=int(data.get("prompt_eval_count") or 0),
+            prompt_seconds=float(data.get("prompt_eval_duration") or 0) / 1e9,
+            load_seconds=float(data.get("load_duration") or 0) / 1e9,
         )

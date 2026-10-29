@@ -1,6 +1,7 @@
 """Run one task against one backend: converse, execute tools in a throwaway repo copy, then score."""
 from __future__ import annotations
 
+import difflib
 import re
 import shutil
 import tempfile
@@ -52,6 +53,9 @@ def converse(task: Task, backend: Backend, executor: ToolExecutor, tr: Transcrip
         tr.turns = turn
         tr.eval_tokens += response.eval_tokens
         tr.eval_seconds += response.eval_seconds
+        tr.prompt_tokens += response.prompt_tokens
+        tr.prompt_seconds += response.prompt_seconds
+        tr.load_seconds += response.load_seconds
         assistant: dict = {"role": "assistant", "content": response.content}
         if response.tool_calls:
             assistant["tool_calls"] = [
@@ -73,6 +77,33 @@ def converse(task: Task, backend: Backend, executor: ToolExecutor, tr: Transcrip
     tr.hit_limit = True
 
 
+_SKIP_DIRS = {"__pycache__", ".pytest_cache"}
+
+
+def repo_diff(before: Path, after: Path, limit: int = 20000) -> str:
+    """Unified diff of what the model changed. Saved in the run log so a failed run can be inspected later."""
+
+    def files(base: Path) -> dict[str, Path]:
+        return {
+            p.relative_to(base).as_posix(): p
+            for p in sorted(base.rglob("*"))
+            if p.is_file() and not (_SKIP_DIRS & set(p.relative_to(base).parts)) and p.suffix != ".pyc"
+        }
+
+    old, new = files(before), files(after)
+    chunks: list[str] = []
+    for rel in sorted(old.keys() | new.keys()):
+        try:
+            a = old[rel].read_text(encoding="utf-8").splitlines(keepends=True) if rel in old else []
+            b = new[rel].read_text(encoding="utf-8").splitlines(keepends=True) if rel in new else []
+        except UnicodeDecodeError:
+            continue
+        if a != b:
+            chunks.append("".join(difflib.unified_diff(a, b, f"a/{rel}", f"b/{rel}")))
+    text = "".join(chunks)
+    return text if len(text) <= limit else text[:limit] + "\n[diff cut off]\n"
+
+
 def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int = 12, max_turns: int = 10) -> RunRecord:
     started = time.monotonic()
     tr = Transcript()
@@ -86,5 +117,6 @@ def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int 
             tr.wall_seconds = time.monotonic() - started
             return RunRecord(task, "error", str(exc), tr, None)
         check = evaluate(task, tr, root, fixture_dir, default_max_calls=max_calls)
+        tr.final_diff = repo_diff(fixture_dir, root)
     tr.wall_seconds = time.monotonic() - started
     return RunRecord(task, "ok", "", tr, check)

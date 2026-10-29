@@ -3,6 +3,14 @@
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic versioning.
 
+## [1.0.2] - 2026-10-29
+
+### Added
+- Each run now records prompt tokens, time spent reading the prompt and model load time (Ollama; llama.cpp servers report prompt time when they send `timings`). Older result databases are upgraded in place.
+- The report has a "Where the time went" table: seconds per task split into generating, reading the prompt and loading, plus output and prompt tokens. It shows whether a model is slow because it writes a lot or because the context grows.
+- When a run fails with `call_limit`, its log now says how many calls and turns were used, what the task allows, and whether the final repository was correct. This separates "too many calls" from "wrong fix".
+- Each run log now ends with `final_diff`, the unified diff of the repository the model left behind. Failed runs can be inspected after the fact, for example to run the tests against what a model produced.
+
 ## [1.0.1] - 2026-10-24
 
 ### Fixed

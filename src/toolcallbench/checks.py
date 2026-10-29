@@ -192,6 +192,12 @@ def evaluate(task: Task, tr: Transcript, root: Path, fixture_dir: Path, default_
 
     # Outcome: the answer text and the final state of the repository.
     outcome_ok = _check_outcome(task, tr, root, fixture_dir, details)
+    if tool_type == "call_limit":
+        # Say what was hit and whether the work was actually done, so a "too strict" budget is easy to spot.
+        details.append(
+            f"limit: {len(calls)} calls in {tr.turns} turns (this task allows {max_calls} calls); "
+            f"final repo state was {'correct' if outcome_ok else 'wrong'}"
+        )
 
     if not parse_ok:
         failure = parse_type
