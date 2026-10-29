@@ -3,6 +3,11 @@
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic versioning.
 
+## [1.0.3] - 2026-10-29
+
+### Changed
+- The report now shows "Why runs failed" right after the pass-rate summary. It groups the 13 failure types into five families (wrong tool, bad arguments, no real call, over budget, wrong result), followed by the full per-type table. A pass rate alone hides which kind of fix a model needs.
+
 ## [1.0.2] - 2026-10-29
 
 ### Added

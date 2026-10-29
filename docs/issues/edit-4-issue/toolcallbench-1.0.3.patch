@@ -1,0 +1,199 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d604534..7157274 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -3,6 +3,11 @@
+ All notable changes to this project are recorded here. The format follows
+ [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic versioning.
+ 
++## [1.0.3] - 2026-10-29
++
++### Changed
++- The report now shows "Why runs failed" right after the pass-rate summary. It groups the 13 failure types into five families (wrong tool, bad arguments, no real call, over budget, wrong result), followed by the full per-type table. A pass rate alone hides which kind of fix a model needs.
++
+ ## [1.0.2] - 2026-10-29
+ 
+ ### Added
+diff --git a/docs/ROADMAP.md b/docs/ROADMAP.md
+index 9dbca28..f06559f 100644
+--- a/docs/ROADMAP.md
++++ b/docs/ROADMAP.md
+@@ -10,6 +10,7 @@ agent work. None are promised.
+ - **More tasks**: 40 tasks, including multi-file edits and longer chains.
+ - **Context stress tasks**: a large file that forces the model to use `start_line` / `end_line`.
+ - **Sampling variants**: run at temperature 0.0 and 0.7 and report the gap.
++- **Check test runs after edits**: for tasks that say "run the tests to confirm" (chain-01, chain-04), require a test run after the last edit. Ship as a new task version so old results are not compared with new ones. See `docs/issues/edit-failures-issue/ISSUE.md`.
+ 
+ ## Later
+ 
+diff --git a/docs/USER_GUIDE.md b/docs/USER_GUIDE.md
+index 5fbe56a..203509b 100644
+--- a/docs/USER_GUIDE.md
++++ b/docs/USER_GUIDE.md
+@@ -77,7 +77,8 @@ Key `run` options: `--config FILE`, `--backend ollama|openai-compat|scripted`, `
+ - **Settings** table: compare two reports only if these match.
+ - **Summary**: pass rate overall and per group, median tokens per second, median seconds per task, and calls versus the reference (1.00 is ideal; 2.00 means twice as many calls).
+ - **Errors**: runs where the server failed. They are not in the pass rate.
+-- **Failure types**: why runs failed. A model with many `invalid_json` failures has a formatting problem; many `no_call` means it answers from memory instead of using tools; many `outcome_mismatch` means it calls tools but reaches wrong results.
++- **Why runs failed**: right after the summary. Failures are grouped into wrong tool, bad arguments, no real call, over budget and wrong result, then listed by exact type. Each group needs a different fix, so read it together with the pass rate.
++- **Failure types**: the exact types. A model with many `invalid_json` failures has a formatting problem; many `no_call` means it answers from memory instead of using tools; many `outcome_mismatch` means it calls tools but reaches wrong results.
+ - **Per-task results**: cells are passed/scored. With 3 repeats, `1/3` is a flaky task, not a hard failure.
+ 
+ ## Compare quantization levels
+diff --git a/docs/issues/edit-failures-issue/ISSUE.md b/docs/issues/edit-failures-issue/ISSUE.md
+new file mode 100644
+index 0000000..202952b
+--- /dev/null
++++ b/docs/issues/edit-failures-issue/ISSUE.md
+@@ -0,0 +1,31 @@
++# Issue: why do edits fail, and is chain-04 caused by stale line offsets?
++
++Reported on the dev.to post about v1.0.1 (comment).
++
++## What was said
++1. Models pass command runs because stdout feedback is immediate, but file editing needs matching indentation and exact line anchors. When small models write unified diffs, off-by-one line counts cause patch rejects that cascade into outcome mismatches.
++2. For chain-04 failing across every model, check whether the harness evaluates intermediate test runs. If an agent fixes two bugs in one turn without running pytest between them, the second patch relies on stale line offsets from the first edit.
++
++## What the code does
++- `edit_file` needs `old_text` to match the file exactly. `apply_patch` needs the context and removed lines to match exactly.
++- **Hunk line counts are not enforced.** `patching.py` locates each hunk by its content (it tries the stated line first, then searches). Off-by-one counts and stale offsets do not cause rejects. Only a text mismatch (for example wrong indentation) does.
++- chain-04's two fixes are in different files (`catalog.py`, `fees.py`), so one edit cannot shift the other's lines.
++
++## What the demo data shows
++28 failures in the demo run (4 models, 1 run each). `patch_failed` was 3 of them (qwen3:8b 1, llama3.1:8b 2). The larger edit-related groups were `outcome_mismatch` (qwen3.5:0.8b, 5: valid calls, wrong final repo) and `wrong_args` (llama3.1:8b, 3). So a reject cascade does not explain most failures. Transcripts were not all read.
++
++Check with your own data:
++```bash
++sqlite3 results/results.sqlite "select r.model, c.tool, c.error_kind, count(*) from calls c join runs r on r.id=c.run_id where c.tool in ('edit_file','apply_patch') and c.ok=0 group by 1,2,3;"
++```
++
++## Real gap found
++chain-04 requires a `run_command` containing `pytest`, but the order is not enforced. A pytest run before any edit satisfies it. The final repo is still judged by running the real tests, so scores are correct, but "run the suite at the end to confirm" is not checked.
++
++## Decision
++- No code change now. Making the check stricter changes the task, so old and new results would not be comparable.
++- Added to the roadmap: check that a test run happens after the last edit (chain-01 and chain-04), as a new task version.
++- v1.0.2 already saves each run's final repo diff (`final_diff`) and has `scripts/replay_final_repo.py`, so chain-04 can be triaged properly. See `docs/TRIAGE_chain-04_and_timing.md`.
++
++## Status
++Documented. Roadmap item open.
+diff --git a/docs/issues/failure-split-issue/ISSUE.md b/docs/issues/failure-split-issue/ISSUE.md
+new file mode 100644
+index 0000000..1431f3b
+--- /dev/null
++++ b/docs/issues/failure-split-issue/ISSUE.md
+@@ -0,0 +1,28 @@
++# Issue: show why runs failed before the pass rate
++
++Reported on the dev.to post about v1.0.1 (comment).
++
++## What was said
++Split the failures before the pass rate for local tool calling: wrong tool name, malformed arguments, or no call at all. Each needs a different fix, so one pass-or-fail number hides the cause.
++
++## Is it right?
++Yes. The tool already records a failure type for every failed run (13 types), but the report put the pass-rate table first and the failure table further down, so the breakdown was easy to miss. The blog and Reddit posts also led with the pass rate.
++
++## How the 13 types map to the three cases
++| Case | Failure types |
++|---|---|
++| Wrong tool name | `unknown_tool` (no such tool), `wrong_tool` (real tool, wrong one for the task) |
++| Malformed arguments | `invalid_json`, `invalid_args`, and `wrong_args` (valid call, wrong values) |
++| No call | `no_call`, and `text_tool_call` (the call is written out as text) |
++
++Two big groups are not in those three cases: `call_limit` (over the call or turn budget) and `outcome_mismatch` / `patch_failed` (the repo ended up wrong). In the demo run (4 models, 1 run each) these were the largest: `call_limit` 7 runs, `outcome_mismatch` 5 runs.
++
++## Fix (v1.0.3)
++- The report has a "Why runs failed" section right after the summary.
++- Failure types are grouped into five families: wrong tool, bad arguments, no real call, over budget, wrong result. The full per-type table follows it.
++- A test makes sure every failure type belongs to exactly one family.
++
++Files: `src/toolcallbench/report.py`, `tests/test_timing.py`, `docs/USER_GUIDE.md`, `CHANGELOG.md`.
++
++## Status
++Fixed in v1.0.3. Reply to the commenter once 1.0.3 is on PyPI.
+diff --git a/src/toolcallbench/__init__.py b/src/toolcallbench/__init__.py
+index 2eeb0ae..6607cdc 100644
+--- a/src/toolcallbench/__init__.py
++++ b/src/toolcallbench/__init__.py
+@@ -1,3 +1,3 @@
+ """ToolCallBench: measure how reliably local LLMs call tools on your own repo and hardware."""
+ 
+-__version__ = "1.0.2"
++__version__ = "1.0.3"
+diff --git a/src/toolcallbench/report.py b/src/toolcallbench/report.py
+index 9c6a95d..6e42103 100644
+--- a/src/toolcallbench/report.py
++++ b/src/toolcallbench/report.py
+@@ -10,6 +10,15 @@ from .checks import FAILURE_TYPES
+ from .models import GROUPS
+ from .store import Store
+ 
++# Groups of failure types, by what to fix. Every type in checks.FAILURE_TYPES belongs to exactly one group.
++FAILURE_FAMILIES = {
++    "Wrong tool": ["unknown_tool", "wrong_tool", "too_few_calls", "unneeded_call", "not_parallel"],
++    "Bad arguments": ["invalid_json", "invalid_args", "wrong_args"],
++    "No real call": ["no_call", "text_tool_call"],
++    "Over budget": ["call_limit"],
++    "Wrong result": ["patch_failed", "outcome_mismatch"],
++}
++
+ SETTING_LABELS = [
+     ("backend", "Backend"),
+     ("backend_version", "Backend version"),
+@@ -124,6 +133,20 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
+         )
+     out += _table(header, rows)
+ 
++    seen_types = [t for t in FAILURE_TYPES if any(t in m["failures"] for m in models)]
++    out += ["", "## Why runs failed", ""]
++    if seen_types:
++        out += ["Read this next to the pass rate: each kind of failure needs a different fix.", ""]
++        fam_names = list(FAILURE_FAMILIES)
++        out += _table(
++            ["Model"] + fam_names,
++            [[m["model"]] + [str(sum(m["failures"].get(t, 0) for t in FAILURE_FAMILIES[f])) for f in fam_names] for m in models],
++        )
++        out += ["", "Every failure type, in detail:", ""]
++        out += _table(["Model"] + seen_types, [[m["model"]] + [str(m["failures"].get(t, 0)) for t in seen_types] for m in models])
++    else:
++        out.append("No failures.")
++
+     out += ["", "## Where the time went", "", "Medians per task. A dash means the server did not report that number.", ""]
+     rows = []
+     for m in models:
+@@ -133,12 +156,6 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
+         )
+     out += _table(["Model", "s/task", "Generating s", "Reading prompt s", "Loading s", "Output tokens", "Prompt tokens"], rows)
+ 
+-    seen_types = [t for t in FAILURE_TYPES if any(t in m["failures"] for m in models)]
+-    out += ["", "## Failure types", ""]
+-    if seen_types:
+-        out += _table(["Model"] + seen_types, [[m["model"]] + [str(m["failures"].get(t, 0)) for t in seen_types] for m in models])
+-    else:
+-        out.append("No failures.")
+ 
+     out += ["", "## Per-task results", "", "Each cell is passed runs / scored runs.", ""]
+     task_ids = sorted({r["task_id"] for r in runs})
+diff --git a/tests/test_timing.py b/tests/test_timing.py
+index 10d07b0..a875712 100644
+--- a/tests/test_timing.py
++++ b/tests/test_timing.py
+@@ -106,3 +106,18 @@ def test_read_only_run_has_an_empty_diff(tasks, fixture_dir):
+     task = next(t for t in tasks if t.id == "read-01")
+     record = run_once(task, ScriptedBackend(tasks, "oracle"), fixture_dir)
+     assert record.transcript.final_diff == ""
++
++
++def test_every_failure_type_is_in_exactly_one_family():
++    from toolcallbench.checks import FAILURE_TYPES
++    from toolcallbench.report import FAILURE_FAMILIES
++
++    listed = [t for types in FAILURE_FAMILIES.values() for t in types]
++    assert sorted(listed) == sorted(FAILURE_TYPES)
++
++
++def test_report_shows_failure_families_right_after_the_summary(tmp_path, tasks, fixture_dir):
++    store = _store_with_runs(tmp_path, tasks, fixture_dir, profile="no_call", ids=("read-01", "edit-01"))
++    md = render_markdown(store, "s1", {t.id: (t.group, t.title) for t in tasks})
++    assert md.index("## Summary") < md.index("## Why runs failed") < md.index("## Where the time went")
++    assert "No real call" in md and "Wrong tool" in md
