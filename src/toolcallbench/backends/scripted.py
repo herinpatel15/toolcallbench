@@ -67,6 +67,10 @@ class ScriptedBackend(Backend):
             for call in calls:
                 if call.name == "edit_file":
                     call.arguments = {**call.arguments, "old_text": "THIS TEXT IS NOT IN THE FILE"}
+                elif call.name == "apply_edits":
+                    call.arguments = {"edits": [{**e, "old_text": "THIS TEXT IS NOT IN THE FILE"} for e in call.arguments.get("edits", [])]}
+                elif call.name == "set_json_values":
+                    call.arguments = {**call.arguments, "updates": [{**u, "key_path": ["no_such_key"]} for u in call.arguments.get("updates", [])]}
                 elif call.name == "apply_patch":
                     call.arguments = {"patch": "--- a/missing.py\n+++ b/missing.py\n@@ -1,1 +1,1 @@\n-x\n+y\n"}
             return content, calls

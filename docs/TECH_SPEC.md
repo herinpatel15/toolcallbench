@@ -34,6 +34,17 @@ strings and each tool result gets a `tool_call_id`.
 | `apply_patch` | `patch` | none | Unified diff; existing files only; line numbers in `@@` headers are not enforced |
 | `run_command` | `command` | none | No shell; allow-list below |
 
+**Extra tools (nested arguments).** Only tasks that list them in `extra_tools` are offered these:
+
+| Tool | Arguments | Notes |
+| --- | --- | --- |
+| `apply_edits` | `edits`: list of `{path, old_text, new_text}` | All or nothing: if any edit does not apply, no file is changed. Edits in one file apply in order |
+| `set_json_values` | `path`, `updates`: list of `{key_path: [string], value}` | Every key must already exist; the file is rewritten with 2-space indent |
+
+A tool that was not offered to the task is `unknown_tool` even if it exists. With
+`--tools-offered task` only the tools a task needs are offered (tasks that need none keep the
+six core tools, so a wrong call still shows).
+
 All schemas set `additionalProperties: false`, so an unexpected argument is an
 `invalid_args` failure.
 
@@ -109,6 +120,7 @@ A failed run gets exactly one type:
 | 2 | `unneeded_call` | called a tool when none was needed |
 | 2 | `no_call` | answered without calling a needed tool |
 | 2 | `too_few_calls` | stopped before enough calls |
+| 2 | `no_confirm_run` | `expect.after_last_edit` is set and no test run came after the last successful edit |
 | 2 | `wrong_tool` | wrong or forbidden tool |
 | 2 | `not_parallel` | needed calls were made one at a time |
 | 3 | `patch_failed` | outcome wrong and an edit call was rejected |
@@ -124,7 +136,10 @@ Text tool calls are detected with a regular expression on the final reply: `<too
 
 ```yaml
 id: read-01                 # group-NN, group must match the prefix
-group: read                 # read | edit | run | chain | failure
+group: read                 # read | edit | run | chain | failure | nested
+optional: false             # true: only run when named (--groups / --tasks)
+version: 1                  # raise when a task changes meaning; results of different versions are not comparable
+extra_tools: []             # e.g. [apply_edits]
 title: Read one config value
 tools_named: true           # does the prompt name the tool?
 prompt: |
@@ -139,6 +154,10 @@ reference:                  # a solution that must pass; last step is "final"
       - {tool: read_file, args: {path: config/settings.json}}
   - final: loan_days is 14.
 ```
+
+`expect.after_last_edit: {tool: run_command, contains: pytest}` requires such a call after the last
+successful edit call (no successful edit means the check passes). The session settings store
+`tasks_sha`, a fingerprint of id, version, prompt, expect and extra tools of the tasks that ran; `compare` warns when it differs.
 
 Files are validated with a JSON Schema plus extra rules (id prefix, known `expect` keys,
 last reference step is a final answer). `toolcallbench validate-tasks` replays every

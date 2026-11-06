@@ -1,0 +1,38 @@
+id: nested-01
+group: nested
+title: Fix both bugs with one apply_edits call
+tools_named: true
+optional: true
+extra_tools: [apply_edits]
+prompt: |
+  Two tests in this repository fail. Use the apply_edits tool, once, to fix both bugs
+  (they are in different files), then run the test suite to confirm that everything passes.
+expect:
+  calls:
+    - tool: apply_edits
+    - tool: run_command
+      args: {command: {contains: pytest}}
+  forbidden_tools: [edit_file, apply_patch]
+  max_calls: 10
+  after_last_edit:
+    - tool: run_command
+      args: {command: {contains: pytest}}
+  command:
+    - argv: [python, -m, pytest, -q]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: src/shelf/catalog.py}}
+      - {tool: read_file, args: {path: src/shelf/fees.py}}
+  - calls:
+      - tool: apply_edits
+        args:
+          edits:
+            - path: src/shelf/catalog.py
+              old_text: "    return [b for b in books if query in b.title]"
+              new_text: "    needle = query.lower()\n    return [b for b in books if needle in b.title.lower()]"
+            - path: src/shelf/fees.py
+              old_text: "    return round(days * per_day, 2)"
+              new_text: "    fee = round(days * per_day, 2)\n    if cap is not None:\n        fee = min(fee, cap)\n    return fee"
+  - calls:
+      - {tool: run_command, args: {command: "python -m pytest -q"}}
+  - final: Fixed the title search and the late-fee cap with one apply_edits call; all tests pass.

@@ -1,6 +1,8 @@
 """Load and validate task files (tasks/*.yaml)."""
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -8,12 +10,14 @@ import jsonschema
 import yaml
 
 from .models import GROUPS, Task
+from .tools import EXTRA_TOOL_NAMES
 
 EXPECT_KEYS = {
     "calls",
     "min_calls",
     "max_calls",
     "ordered",
+    "after_last_edit",
     "parallel",
     "no_tool_calls",
     "forbidden_tools",
@@ -43,6 +47,9 @@ TASK_SCHEMA = {
         "group": {"enum": list(GROUPS)},
         "title": {"type": "string", "minLength": 1},
         "tools_named": {"type": "boolean"},
+        "optional": {"type": "boolean"},
+        "version": {"type": "integer", "minimum": 1},
+        "extra_tools": {"type": "array", "items": {"enum": list(EXTRA_TOOL_NAMES)}, "uniqueItems": True},
         "prompt": {"type": "string", "minLength": 1},
         "expect": {"type": "object"},
         "reference": {
@@ -93,6 +100,11 @@ def _validate_expect(expect: dict[str, Any], where: str) -> None:
             jsonschema.validate(req, _CALL)
         except jsonschema.ValidationError as exc:
             raise TaskError(f"{where}: bad expect.calls entry: {exc.message}") from exc
+    for req in expect.get("after_last_edit", []):
+        try:
+            jsonschema.validate(req, _CALL)
+        except jsonschema.ValidationError as exc:
+            raise TaskError(f"{where}: bad expect.after_last_edit entry: {exc.message}") from exc
     for item in expect.get("command", []):
         if not isinstance(item, dict) or not isinstance(item.get("argv"), list):
             raise TaskError(f"{where}: each expect.command entry needs an argv list")
@@ -121,6 +133,9 @@ def load_task_file(path: Path) -> Task:
         expect=data["expect"],
         reference=data["reference"],
         tools_named=bool(data.get("tools_named", False)),
+        optional=bool(data.get("optional", False)),
+        extra_tools=list(data.get("extra_tools", [])),
+        version=int(data.get("version", 1)),
     )
 
 
@@ -138,7 +153,13 @@ def load_tasks(tasks_dir: Path) -> list[Task]:
     return tasks
 
 
-def select_tasks(tasks: list[Task], ids: list[str] | None = None, groups: list[str] | None = None) -> list[Task]:
+def select_tasks(
+    tasks: list[Task],
+    ids: list[str] | None = None,
+    groups: list[str] | None = None,
+    include_optional: bool = False,
+) -> list[Task]:
+    """Pick tasks. Optional tasks are left out of a default run; naming them (ids or groups) brings them in."""
     selected = tasks
     if ids:
         unknown = set(ids) - {t.id for t in tasks}
@@ -150,6 +171,23 @@ def select_tasks(tasks: list[Task], ids: list[str] | None = None, groups: list[s
         if unknown:
             raise TaskError(f"unknown groups: {sorted(unknown)}; choose from {', '.join(GROUPS)}")
         selected = [t for t in selected if t.group in groups]
+    if not ids and not groups and not include_optional:
+        selected = [t for t in selected if not t.optional]
     if not selected:
         raise TaskError("no tasks selected")
     return selected
+
+
+def tasks_fingerprint(tasks: list[Task]) -> str:
+    """A short hash of everything that decides how a task is run and scored. Used to warn when two sessions differ."""
+    payload = [
+        {
+            "id": t.id,
+            "version": t.version,
+            "prompt": t.prompt,
+            "expect": t.expect,
+            "extra_tools": t.extra_tools,
+        }
+        for t in sorted(tasks, key=lambda t: t.id)
+    ]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]

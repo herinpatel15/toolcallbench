@@ -12,7 +12,7 @@ from typing import Any
 from .models import CallRecord, CheckResult, Task, Transcript
 from .tools import run_trusted
 
-EDIT_TOOLS = {"edit_file", "apply_patch"}
+EDIT_TOOLS = {"edit_file", "apply_patch", "apply_edits", "set_json_values"}
 
 FAILURE_TYPES = (
     "invalid_json",
@@ -25,6 +25,7 @@ FAILURE_TYPES = (
     "not_parallel",
     "wrong_tool",
     "too_few_calls",
+    "no_confirm_run",
     "patch_failed",
     "wrong_args",
     "outcome_mismatch",
@@ -83,6 +84,15 @@ def _assign(reqs: list[dict[str, Any]], calls: list[CallRecord], ordered: bool, 
         if tail is not None:
             return [position, *tail]
     return None
+
+
+def _after_last_edit_ok(reqs: list[dict[str, Any]], calls: list[CallRecord]) -> bool:
+    """Every requirement is met by a valid call that comes after the last edit that worked. No edit: nothing to check."""
+    edits = [c.index for c in calls if c.tool in EDIT_TOOLS and c.valid and c.ok]
+    if not edits:
+        return True
+    later = [c for c in calls if c.index > max(edits)]
+    return all(any(_tool_matches(r, c) and _args_match(r, c) for c in later) for r in reqs)
 
 
 def _parallel_ok(reqs: list[dict[str, Any]], calls: list[CallRecord]) -> bool:
@@ -177,6 +187,8 @@ def evaluate(task: Task, tr: Transcript, root: Path, fixture_dir: Path, default_
         tool_type = "wrong_tool"
     elif reqs and _assign(reqs, valid, ordered) is None:
         tool_type = "wrong_tool"
+    elif exp.get("after_last_edit") and not _after_last_edit_ok(exp["after_last_edit"], calls):
+        tool_type = "no_confirm_run"
     elif exp.get("parallel") and not _parallel_ok(reqs, valid):
         tool_type = "not_parallel"
     tool_ok = tool_type == ""

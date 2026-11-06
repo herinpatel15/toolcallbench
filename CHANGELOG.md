@@ -3,6 +3,24 @@
 All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic versioning.
 
+## [1.1.0] - 2026-10-30
+
+### Added
+- **Pass-rate ranges.** The report shows a 95% range next to each pass rate and says plainly when two models cannot be told apart. With `--repeats` above 1 it adds a run-to-run consistency table (always / sometimes / never passed).
+- **`toolcallbench compare [A] [B]`** compares two sessions (default: previous and latest): which settings differ, pass-rate change with a better / worse / no clear difference verdict, tasks that flipped, and failure-family changes. Saved to `results/reports/compare-A-vs-B.md`.
+- **`toolcallbench export`** writes a session as JSON or CSV (`--format`, `--output`, `-` for stdout).
+- **Nested-argument tasks** (group `nested`, four tasks, opt-in): `apply_edits` takes a list of edits across files and applies all or none; `set_json_values` takes a list of key paths. They are only run when named with `--groups nested` or `--tasks`, so the default run stays the 20 core tasks.
+- **`--tools-offered all|task`**: offer all tools, or only the ones a task needs (an ablation; it gives the model a hint, so label results accordingly).
+- **`--max-calls-per-turn N`**: run only the first N tool calls of each reply and tell the model the rest were skipped. Tests whether small models do better one call at a time.
+- **Tests after the last edit.** Tasks can require a test run after the last successful edit (`expect.after_last_edit`). A miss is the new failure type `no_confirm_run` (14 failure types now). `chain-04` uses it.
+- **Hosted OpenAI-compatible APIs.** `--api-key-env NAME` (or `api_key_env:` in the config) reads the key from an environment variable. The key is never accepted on the command line or in YAML, and never stored.
+- Sessions record a task-set fingerprint (`tasks_sha`) so `compare` can warn when two sessions did not run the same tasks.
+
+### Changed
+- `chain-04` is now task version 2. Earlier `chain-04` results are not comparable with new ones.
+- The failure family "Wrong tool" is now "Wrong tool or step" and includes `no_confirm_run`.
+- The report only lists task groups that were run.
+
 ## [1.0.3] - 2026-10-29
 
 ### Changed

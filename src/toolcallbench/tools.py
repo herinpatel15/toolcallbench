@@ -1,4 +1,7 @@
-"""The six tools offered to the model, their JSON schemas, and a sandboxed executor.
+"""The tools offered to the model, their JSON schemas, and a sandboxed executor.
+
+Six core tools are offered on every task. Two extra tools take nested arguments (a list of objects);
+they are offered only to tasks that ask for them, so the core results stay comparable.
 
 The executor works inside one directory (a fresh copy of the fixture repo). It is
 a safety net against accidents, not a security boundary: see docs/SECURITY.md.
@@ -94,14 +97,94 @@ TOOL_SPECS: list[dict[str, Any]] = [
     ),
 ]
 
-TOOL_NAMES = [spec["function"]["name"] for spec in TOOL_SPECS]
-_VALIDATORS = {spec["function"]["name"]: Draft202012Validator(spec["function"]["parameters"]) for spec in TOOL_SPECS}
+# Extra tools with nested arguments (an array of objects). Offered only to tasks that list them in `extra_tools`.
+EXTRA_TOOL_SPECS: list[dict[str, Any]] = [
+    _spec(
+        "apply_edits",
+        "Make several exact-text replacements, possibly in different files, in one call. Each edit needs path, "
+        "old_text and new_text; old_text must match its file exactly once. Either every edit is applied or none is.",
+        {
+            "edits": {
+                "type": "array",
+                "minItems": 1,
+                "description": "The replacements to make, in order",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "File path relative to the repository root"},
+                        "old_text": {"type": "string", "description": "Exact text to replace; must occur exactly once"},
+                        "new_text": {"type": "string", "description": "Replacement text"},
+                    },
+                    "required": ["path", "old_text", "new_text"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        ["edits"],
+    ),
+    _spec(
+        "set_json_values",
+        "Set values in a JSON file. Each update gives key_path (the keys from the top of the file down to the value, "
+        "as a list of strings) and the new value. The keys must already exist.",
+        {
+            "path": {"type": "string", "description": "JSON file path relative to the repository root"},
+            "updates": {
+                "type": "array",
+                "minItems": 1,
+                "description": "The values to set",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "key_path": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                        "value": {"type": ["string", "number", "boolean", "null"]},
+                    },
+                    "required": ["key_path", "value"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        ["path", "updates"],
+    ),
+]
+
+TOOL_NAMES = [spec["function"]["name"] for spec in TOOL_SPECS]  # the six core tools
+EXTRA_TOOL_NAMES = [spec["function"]["name"] for spec in EXTRA_TOOL_SPECS]
+ALL_TOOL_NAMES = TOOL_NAMES + EXTRA_TOOL_NAMES
+EDIT_TOOL_NAMES = {"edit_file", "apply_patch", "apply_edits", "set_json_values"}
+_VALIDATORS = {
+    spec["function"]["name"]: Draft202012Validator(spec["function"]["parameters"]) for spec in TOOL_SPECS + EXTRA_TOOL_SPECS
+}
+TOOLS_OFFERED_MODES = ("all", "task")
 
 
-def validate_arguments(name: str, arguments: Any) -> tuple[dict[str, Any] | None, str, str]:
-    """Check a raw tool call. Returns (arguments, error_kind, message); error_kind is "" when valid."""
-    if name not in _VALIDATORS:
-        return None, "unknown_tool", f"unknown tool '{name}'; available tools: {', '.join(TOOL_NAMES)}"
+def tool_specs_for(task: Any, mode: str = "all") -> list[dict[str, Any]]:
+    """The tools to offer for one task.
+
+    "all": the six core tools plus the task's extra tools (the default).
+    "task": only the tools the task's reference solution uses. This is an ablation that shows how much
+    of the difficulty is choosing a tool; it gives the model a hint.
+    """
+    if mode not in TOOLS_OFFERED_MODES:
+        raise ValueError(f"unknown tools-offered mode '{mode}'; choose from {', '.join(TOOLS_OFFERED_MODES)}")
+    by_name = {spec["function"]["name"]: spec for spec in TOOL_SPECS + EXTRA_TOOL_SPECS}
+    if mode == "task":
+        used = {c["tool"] for step in task.reference for c in step.get("calls", [])}
+        names = [n for n in ALL_TOOL_NAMES if n in used]
+        if not names:  # a task that needs no tool still gets the core tools, so a wrong call can be seen
+            names = list(TOOL_NAMES)
+    else:
+        names = TOOL_NAMES + [n for n in task.extra_tools if n in by_name]
+    return [by_name[n] for n in names]
+
+
+def validate_arguments(name: str, arguments: Any, allowed: list[str] | None = None) -> tuple[dict[str, Any] | None, str, str]:
+    """Check a raw tool call. Returns (arguments, error_kind, message); error_kind is "" when valid.
+
+    `allowed` lists the tools offered to the model for this task (default: the six core tools).
+    """
+    offered = TOOL_NAMES if allowed is None else allowed
+    if name not in _VALIDATORS or name not in offered:
+        return None, "unknown_tool", f"unknown tool '{name}'; available tools: {', '.join(offered)}"
     if isinstance(arguments, str):
         try:
             arguments = json.loads(arguments)
@@ -152,6 +235,8 @@ class ToolExecutor:
             "edit_file": self._edit_file,
             "apply_patch": self._apply_patch,
             "run_command": self._run_command,
+            "apply_edits": self._apply_edits,
+            "set_json_values": self._set_json_values,
         }
 
     # ------------------------------------------------------------------ public
@@ -263,6 +348,52 @@ class ToolExecutor:
             raise ToolError(f"old_text matches {count} places; include more surrounding lines so it matches once")
         target.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
         return f"edited {path}"
+
+    def _apply_edits(self, edits: list[dict[str, str]]) -> str:
+        """All edits are checked first and written only if every one of them is valid."""
+        texts: dict[Path, str] = {}
+        for number, edit in enumerate(edits, 1):
+            target = self._resolve(edit["path"])
+            if not target.is_file():
+                raise ToolError(f"edit {number}: file not found: {edit['path']}")
+            if edit["old_text"] == "":
+                raise ToolError(f"edit {number}: old_text must not be empty")
+            text = texts.get(target)
+            if text is None:
+                text = target.read_text(encoding="utf-8")
+            count = text.count(edit["old_text"])
+            if count == 0:
+                raise ToolError(
+                    f"edit {number}: old_text was not found in {edit['path']}. It must match exactly, including "
+                    "whitespace. Nothing was changed."
+                )
+            if count > 1:
+                raise ToolError(f"edit {number}: old_text matches {count} places in {edit['path']}. Nothing was changed.")
+            texts[target] = text.replace(edit["old_text"], edit["new_text"], 1)
+        for target, text in texts.items():
+            target.write_text(text, encoding="utf-8")
+        return f"applied {len(edits)} edit(s) to {len(texts)} file(s)"
+
+    def _set_json_values(self, path: str, updates: list[dict[str, Any]]) -> str:
+        target = self._resolve(path)
+        if not target.is_file():
+            raise ToolError(f"file not found: {path}")
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ToolError(f"{path} is not valid JSON: {exc.msg}") from exc
+        for number, update in enumerate(updates, 1):
+            keys = update["key_path"]
+            node: Any = data
+            for key in keys[:-1]:
+                if not isinstance(node, dict) or key not in node:
+                    raise ToolError(f"update {number}: key path {'.'.join(keys)} not found. Nothing was changed.")
+                node = node[key]
+            if not isinstance(node, dict) or keys[-1] not in node:
+                raise ToolError(f"update {number}: key path {'.'.join(keys)} not found. Nothing was changed.")
+            node[keys[-1]] = update["value"]
+        target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        return f"set {len(updates)} value(s) in {path}"
 
     def _apply_patch(self, patch: str) -> str:
         return "\n".join(apply_unified_diff(patch, self._resolve_for_patch))

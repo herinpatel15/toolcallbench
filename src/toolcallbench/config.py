@@ -7,8 +7,19 @@ from typing import Any
 
 import yaml
 
-SETTINGS_KEYS = {"num_ctx", "temperature", "seed", "repeats", "max_calls", "max_turns", "request_timeout"}
-TOP_KEYS = {"backend", "host", "settings", "declared_server", "models"}
+SETTINGS_KEYS = {
+    "num_ctx",
+    "temperature",
+    "seed",
+    "repeats",
+    "max_calls",
+    "max_turns",
+    "request_timeout",
+    "max_calls_per_turn",
+    "tools_offered",
+}
+TOP_KEYS = {"backend", "host", "api_key_env", "settings", "declared_server", "models"}
+DEFAULT_API_KEY_ENV = "TOOLCALLBENCH_API_KEY"
 
 
 class ConfigError(ValueError):
@@ -33,6 +44,10 @@ class RunConfig:
     max_calls: int = 12
     max_turns: int = 10
     request_timeout: float = 300.0
+    max_calls_per_turn: int = 0  # 0 = run every call the model makes in one reply
+    tools_offered: str = "all"  # "all" or "task" (only the tools the reference solution uses)
+    api_key_env: str = ""  # name of the environment variable that holds the API key (never the key itself)
+    api_key: str = field(default="", repr=False)  # read from that variable at run time; never saved
     declared_kv_cache_type: str = "f16"
     declared_flash_attention: bool = False
     profile: str = "oracle"  # only used by the scripted backend
@@ -69,12 +84,19 @@ def load_config(path: Path) -> RunConfig:
     cfg = RunConfig()
     cfg.backend = data.get("backend", cfg.backend)
     cfg.host = data.get("host", cfg.host)
+    cfg.api_key_env = data.get("api_key_env", cfg.api_key_env)
+    if not isinstance(cfg.api_key_env, str) or (cfg.api_key_env and not cfg.api_key_env.replace("_", "").isalnum()):
+        raise ConfigError(f"{path}: api_key_env must be the NAME of an environment variable, not the key itself")
     settings = data.get("settings") or {}
     bad = set(settings) - SETTINGS_KEYS
     if bad:
         raise ConfigError(f"{path}: unknown settings {sorted(bad)}; allowed: {sorted(SETTINGS_KEYS)}")
     for key, value in settings.items():
         setattr(cfg, key, value)
+    if cfg.tools_offered not in ("all", "task"):
+        raise ConfigError(f"{path}: tools_offered must be 'all' or 'task'")
+    if not isinstance(cfg.max_calls_per_turn, int) or cfg.max_calls_per_turn < 0:
+        raise ConfigError(f"{path}: max_calls_per_turn must be 0 or a positive whole number")
     declared = data.get("declared_server") or {}
     cfg.declared_kv_cache_type = str(declared.get("kv_cache_type", cfg.declared_kv_cache_type))
     cfg.declared_flash_attention = bool(declared.get("flash_attention", cfg.declared_flash_attention))

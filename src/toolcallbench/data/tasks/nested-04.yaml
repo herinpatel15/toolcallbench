@@ -1,0 +1,47 @@
+id: nested-04
+group: nested
+title: Add a function and its test in one apply_edits call
+tools_named: true
+optional: true
+extra_tools: [apply_edits]
+prompt: |
+  Use the apply_edits tool, once, to do two things. Add a function shout(text) at the end of src/shelf/utils.py;
+  it returns the text in upper case followed by an exclamation mark, so shout('hi') returns 'HI!'.
+  Then, in tests/test_utils.py, import shout and add a test named test_shout that checks it.
+  Run tests/test_utils.py at the end to confirm that it passes.
+expect:
+  calls:
+    - tool: apply_edits
+    - tool: run_command
+      args: {command: {contains: pytest}}
+  forbidden_tools: [edit_file, apply_patch]
+  max_calls: 8
+  after_last_edit:
+    - tool: run_command
+      args: {command: {contains: pytest}}
+  final_files:
+    tests/test_utils.py:
+      contains: ["def test_shout", "shout"]
+  command:
+    - argv: [python, -m, pytest, -q, tests/test_utils.py]
+    - argv: [python, -c, "import sys; sys.path.insert(0, 'src'); from shelf.utils import shout; assert shout('hi') == 'HI!'"]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: src/shelf/utils.py}}
+      - {tool: read_file, args: {path: tests/test_utils.py}}
+  - calls:
+      - tool: apply_edits
+        args:
+          edits:
+            - path: src/shelf/utils.py
+              old_text: "    return len(isbn) == 13 and isbn.isdigit()"
+              new_text: "    return len(isbn) == 13 and isbn.isdigit()\n\n\ndef shout(text: str) -> str:\n    return text.upper() + \"!\""
+            - path: tests/test_utils.py
+              old_text: "from shelf.utils import format_money, isbn_ok, slugify"
+              new_text: "from shelf.utils import format_money, isbn_ok, shout, slugify"
+            - path: tests/test_utils.py
+              old_text: "    assert not isbn_ok(\"12345\")"
+              new_text: "    assert not isbn_ok(\"12345\")\n\n\ndef test_shout():\n    assert shout(\"hi\") == \"HI!\""
+  - calls:
+      - {tool: run_command, args: {command: "python -m pytest -q tests/test_utils.py"}}
+  - final: Added shout() and test_shout with one apply_edits call; the tests pass.

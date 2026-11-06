@@ -14,7 +14,7 @@ flowchart LR
         server[Model server<br/>Ollama or llama-server]
         files[(results/<br/>SQLite, JSONL, reports)]
         repo[fixtures/repo<br/>sample project]
-        tasks[tasks/*.yaml<br/>20 tasks]
+        tasks[tasks/*.yaml<br/>24 tasks]
     end
     user -->|run, report| cli
     cli -->|HTTP chat + tools| server

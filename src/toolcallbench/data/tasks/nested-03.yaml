@@ -1,0 +1,28 @@
+id: nested-03
+group: nested
+title: Change JSON settings, no tool named
+optional: true
+extra_tools: [apply_edits, set_json_values]
+prompt: |
+  In config/settings.json, change currency to EUR and max_late_fee to 15.0. Leave every other setting as it is.
+expect:
+  calls:
+    - tool: [set_json_values, apply_edits, edit_file, apply_patch]
+  max_calls: 5
+  final_files:
+    config/settings.json:
+      contains: ['"currency": "EUR"', '"max_late_fee": 15.0']
+      not_contains: ['"currency": "USD"', '"max_late_fee": 10.0']
+  command:
+    - argv: [python, -c, "import json; d = json.load(open('config/settings.json')); assert d['currency'] == 'EUR' and d['max_late_fee'] == 15.0 and d['loan_days'] == 14 and d['late_fee_per_day'] == 0.25"]
+reference:
+  - calls:
+      - {tool: read_file, args: {path: config/settings.json}}
+  - calls:
+      - tool: set_json_values
+        args:
+          path: config/settings.json
+          updates:
+            - {key_path: [currency], value: EUR}
+            - {key_path: [max_late_fee], value: 15.0}
+  - final: Changed currency to EUR and max_late_fee to 15.0.

@@ -31,7 +31,8 @@ If you point `--fixture` at **your own repository**, the same limits apply. Do t
 
 ## Data handling
 
-- Nothing is sent anywhere except to the model server you configure.
+- Nothing is sent anywhere except to the model server you configure. With a **hosted** API (`--backend openai-compat --host https://...`) every prompt, file content from the fixture and tool result leaves your machine and goes to that provider. Use a private fixture only with a server you trust.
+- API keys: pass only the **name** of an environment variable (`--api-key-env NAME`). The key is sent as a `Bearer` header, is never accepted on the command line or in YAML (a value that looks like a key is rejected), and is not written to results, logs or reports. The report only says whether a key was set.
 - Transcripts in `results/logs/` contain full prompts and file contents from the fixture; do not publish them if your fixture is private.
 - `results/` is in `.gitignore`.
 
