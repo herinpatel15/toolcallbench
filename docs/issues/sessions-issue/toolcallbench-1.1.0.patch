@@ -1,0 +1,2912 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7157274..a2cebc2 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -3,6 +3,24 @@
+ All notable changes to this project are recorded here. The format follows
+ [Keep a Changelog](https://keepachangelog.com/) and the project uses semantic versioning.
+ 
++## [1.1.0] - 2026-10-30
++
++### Added
++- **Pass-rate ranges.** The report shows a 95% range next to each pass rate and says plainly when two models cannot be told apart. With `--repeats` above 1 it adds a run-to-run consistency table (always / sometimes / never passed).
++- **`toolcallbench compare [A] [B]`** compares two sessions (default: previous and latest): which settings differ, pass-rate change with a better / worse / no clear difference verdict, tasks that flipped, and failure-family changes. Saved to `results/reports/compare-A-vs-B.md`.
++- **`toolcallbench export`** writes a session as JSON or CSV (`--format`, `--output`, `-` for stdout).
++- **Nested-argument tasks** (group `nested`, four tasks, opt-in): `apply_edits` takes a list of edits across files and applies all or none; `set_json_values` takes a list of key paths. They are only run when named with `--groups nested` or `--tasks`, so the default run stays the 20 core tasks.
++- **`--tools-offered all|task`**: offer all tools, or only the ones a task needs (an ablation; it gives the model a hint, so label results accordingly).
++- **`--max-calls-per-turn N`**: run only the first N tool calls of each reply and tell the model the rest were skipped. Tests whether small models do better one call at a time.
++- **Tests after the last edit.** Tasks can require a test run after the last successful edit (`expect.after_last_edit`). A miss is the new failure type `no_confirm_run` (14 failure types now). `chain-04` uses it.
++- **Hosted OpenAI-compatible APIs.** `--api-key-env NAME` (or `api_key_env:` in the config) reads the key from an environment variable. The key is never accepted on the command line or in YAML, and never stored.
++- Sessions record a task-set fingerprint (`tasks_sha`) so `compare` can warn when two sessions did not run the same tasks.
++
++### Changed
++- `chain-04` is now task version 2. Earlier `chain-04` results are not comparable with new ones.
++- The failure family "Wrong tool" is now "Wrong tool or step" and includes `no_confirm_run`.
++- The report only lists task groups that were run.
++
+ ## [1.0.3] - 2026-10-29
+ 
+ ### Changed
+diff --git a/README.md b/README.md
+index 2f09bff..180c23c 100644
+--- a/README.md
++++ b/README.md
+@@ -1,86 +1,323 @@
+-# ToolCallBench
++<h1 align="center">ToolCallBench</h1>
+ 
+-Find out which local language model calls tools reliably **on your own machine**.
++<p align="center">
++  <b>Does your local model really call tools right? Find out on your own machine, with your own repo.</b>
++</p>
+ 
+-ToolCallBench gives a model six tools (read, list, search, edit, patch, run a command) and 20
+-small tasks on a sample Python project. It checks the results with plain code, not with
+-another model, and writes a report that compares models and quantization levels.
++<p align="center">
++  <a href="https://pypi.org/project/toolcallbench/"><img src="https://img.shields.io/pypi/v/toolcallbench" alt="PyPI"/></a>
++  <a href="https://pypi.org/project/toolcallbench/"><img src="https://img.shields.io/pypi/pyversions/toolcallbench" alt="Python versions"/></a>
++  <a href="https://github.com/herinpatel15/toolcallbench/actions/workflows/ci.yml"><img src="https://github.com/herinpatel15/toolcallbench/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
++  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"/></a>
++</p>
+ 
+-It is tuned for a **MacBook M4 with 16 GB of memory** running Ollama, and works with any
+-OpenAI-compatible local server (llama.cpp, LM Studio, vLLM).
++Run `toolcallbench run` and any local model gets **six coding tools** (read, list, search, edit, patch, run a command) and **20 small tasks** on a sample Python project. The result is a report that tells you which model to trust with tool calls and, when one fails, *how* it failed.
+ 
+-## Install and run
++- **Any model, any server.** Ollama, or any OpenAI-compatible server: llama.cpp, LM Studio, vLLM, or a hosted API. The models in the examples are only a demo.
++- **Scored by code, not by another model.** The outcome check runs the real `pytest` on the repository the model left behind. No AI judge.
++- **Shows why it failed.** 14 failure types (`invalid_json`, `wrong_args`, `patch_failed`, `no_confirm_run`, ...) grouped into families, so you can tell a formatting problem from a wrong-tool problem.
++- **Honest numbers.** Every pass rate comes with a 95% range, and `compare` says when two runs cannot be told apart.
++- **Local by default.** Your files and results stay on your machine. Nothing is uploaded.
++
++> [!NOTE]
++> The built-in tasks measure how a model uses *these* tools with *this* system prompt. They do not rank models in general. To test your own project, point `--fixture` at a copy of it and write your own tasks ([Use your own repo](#use-your-own-repo-and-tasks)).
++
++## Quickstart
+ 
+ ```bash
+-pip install toolcallbench
++pip install toolcallbench          # Python 3.10 or newer
+ 
+ mkdir my-bench && cd my-bench
+-toolcallbench init                                  # creates configs/ with example settings
++toolcallbench init                 # creates ./configs with example settings
+ ```
+ 
+-Edit `configs/my-models.yaml` and list the models you have pulled in Ollama, then:
++Edit `configs/my-models.yaml`, list the models you have pulled, then:
+ 
+ ```bash
+-toolcallbench doctor --probe --config configs/my-models.yaml   # check Ollama, models, tool calling
+-toolcallbench run --config configs/my-models.yaml              # run the 20 tasks
+-toolcallbench sessions                                         # list past runs
+-toolcallbench report --session <id>                            # Markdown + HTML report in ./results/reports
++toolcallbench doctor --probe --config configs/my-models.yaml   # is the server up, do the models support tools?
++toolcallbench run --config configs/my-models.yaml              # 20 tasks x your models x 3 repeats
++toolcallbench report --session latest                          # Markdown + HTML in ./results/reports
+ ```
+ 
+-Every setting can also be given as an argument, and arguments override the config file:
++No model installed yet? `toolcallbench run --backend scripted --repeats 1` runs the whole pipeline without one.
++
++Ollama must be running (`ollama serve`) with the models pulled, for example `ollama pull qwen3:8b`.
++
++## What you get
++
++| Output | Where |
++| --- | --- |
++| All runs and settings (SQLite) | `results/results.sqlite` |
++| Full transcript of every run, with the final diff of the repo | `results/logs/` |
++| Report for a session (Markdown and HTML) | `results/reports/<session>.md`, `.html` |
++| Comparison of two sessions | `results/reports/compare-<A>-vs-<B>.md` |
++| JSON or CSV export of a session | `results/exports/<session>.json`, `.csv` |
++
++## See it in action
++
++A report starts with a summary table. This one is a **demo** (one run per task, 20 tasks, four models), shown only to explain the columns:
++
++| Model | Passed | 95% range |
++| --- | --- | --- |
++| gemma4:e4b | 95% (19/20) | 76-99% |
++| qwen3:8b | 75% (15/20) | 53-89% |
++| llama3.1:8b | 60% (12/20) | 39-78% |
++| qwen3.5:0.8b | 55% (11/20) | 34-74% |
++
++The ranges are wide because 20 tasks is a small sample: `qwen3:8b` and `llama3.1:8b` are not clearly different here, and the report says so. That is what the range is for. Use `--repeats 3` or more before you trust a ranking. These numbers show the report format; they are not a verdict on those models. The real report also has columns per task group, tokens per second, seconds per task and calls versus the reference solution.
++
++Right under the summary, **Why runs failed** groups the failures:
++
++| Family | Failure types | Meaning |
++| --- | --- | --- |
++| Wrong tool or step | `wrong_tool`, `unneeded_call`, `too_few_calls`, `not_parallel`, `no_confirm_run` | the model chose or ordered the calls badly |
++| Bad arguments | `invalid_json`, `invalid_args`, `wrong_args`, `patch_failed` | the call was malformed, or the arguments did not apply |
++| No real call | `no_call`, `text_tool_call`, `unknown_tool` | the model answered from memory, wrote the call as text, or invented a tool |
++| Over budget | `call_limit` | too many calls or turns; the log says whether the final repo was correct |
++| Wrong result | `outcome_mismatch` | the calls were fine, the change was wrong |
++
++## How scoring works
++
++A run passes when three things are true:
++
++1. **Parse**: every tool call is valid JSON and matches the tool's schema.
++2. **Tool**: the right tools were called, in the right order, within the call limit.
++3. **Outcome**: the final answer matches, and for edit tasks the real `pytest` passes on the final repository. A diff is never compared, so any correct fix passes.
++
++"Args" (did the model pass the exact expected arguments) is reported but does not decide pass or fail. Server errors are stored as errors and never counted as model failures. A failed run gets exactly one failure type, checked in a fixed order (`docs/TECH_SPEC.md`).
++
++## Commands
++
++| Command | What it does |
++| --- | --- |
++| `toolcallbench init [DIR] [--with-tasks]` | Create example configs; with `--with-tasks` also copy the tasks and sample repo so you can edit them |
++| `toolcallbench doctor [--config FILE] [--probe]` | Check Python, tasks, server and models; `--probe` runs one task per model |
++| `toolcallbench run [options]` | Run the benchmark |
++| `toolcallbench report [--session ID\|latest] [--print]` | Rebuild the report from stored results |
++| `toolcallbench sessions` | List stored sessions |
++| `toolcallbench compare [A] [B]` | Compare two sessions (default: previous vs latest) |
++| `toolcallbench export [--session ID] [--format json\|csv] [--output FILE\|-]` | Write a session's runs to a file |
++| `toolcallbench list-tasks [--markdown]` | Show all 24 tasks |
++| `toolcallbench validate-tasks` | Replay every reference solution; `24/24 reference solutions pass` means everything is intact |
++
++`toolcallbench <command> --help` lists every option. Exit codes: `0` ok, `1` a check failed or the server is unreachable, `2` bad input, `130` Ctrl+C (continue with `--resume`).
+ 
+ ```bash
+ toolcallbench run --model qwen3:8b --model gemma4:e4b --repeats 3 --num-ctx 16384 --groups read,edit
+-toolcallbench run --help
++toolcallbench run --config configs/my-models.yaml --session nightly --resume
+ ```
+ 
+-Other commands: `toolcallbench list-tasks`, `toolcallbench validate-tasks`, `toolcallbench init --with-tasks`
+-(copies the tasks and sample repo so you can edit them; a folder with its own `tasks/` and
+-`fixtures/repo/` uses them instead of the built-in ones). Results are written to `./results`.
++Options for `run` (a command-line option always beats the config file):
+ 
+-No model yet? `toolcallbench run --backend scripted --repeats 1` runs the whole pipeline without one.
++| Option | Meaning | Default |
++| --- | --- | --- |
++| `--backend ollama\|openai-compat\|scripted` | Server type | `ollama` |
++| `--host URL` | Server address | `http://localhost:11434` / `:8080` |
++| `--model NAME` | Model; repeat for several | from config |
++| `--think on\|off\|default` | Ollama thinking mode | `default` |
++| `--num-ctx N` | Context length | 16384 |
++| `--temperature X`, `--seed N` | Sampling; repeat `k` uses `seed + k - 1` | 0.0, 42 |
++| `--repeats N` | Runs per task and model | 3 |
++| `--max-calls N`, `--max-turns N` | Budget per task | 12, 10 |
++| `--tasks IDS`, `--groups NAMES` | Pick tasks (groups: `read,edit,run,chain,failure,nested`) | the 20 core tasks |
++| `--tools-offered all\|task` | Offer all tools, or only those a task needs | `all` |
++| `--max-calls-per-turn N` | Run only the first N calls of each reply (0 = no limit) | 0 |
++| `--api-key-env NAME` | Environment variable holding an API key | none |
++| `--session ID`, `--resume` | Name a run; continue and skip stored runs | start time |
++| `--kv-cache-type T`, `--flash-attention` | Record how your server is set up (not enforced) | `f16`, off |
++| `--fixture PATH`, `--tasks-dir PATH` | Use your own repo / tasks | built in |
+ 
+-Ollama must be running (`ollama serve`) with the models pulled (`ollama pull qwen3:8b`).
+-On a 16 GB Mac, start from the `m4-16gb.yaml` example config. See [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
++## Config file
++
++```yaml
++backend: ollama                    # ollama | openai-compat | scripted
++host: http://localhost:11434       # optional
++settings:                          # all optional
++  num_ctx: 16384
++  temperature: 0.0
++  seed: 42
++  repeats: 3
++  max_calls: 12
++  max_turns: 10
++  request_timeout: 600             # seconds per request; raise it for slow or thinking models
++  tools_offered: all               # all | task
++  max_calls_per_turn: 0            # 0 = no limit
++api_key_env: OPENAI_API_KEY        # NAME of an environment variable, never the key itself
++declared_server:                   # recorded in the report, not enforced
++  kv_cache_type: q8_0
++  flash_attention: true
++models:
++  - name: qwen3:8b
++    think: false                   # per model; leave out for models without a thinking mode
++  - llama3.1:8b                    # a plain string is enough
++```
+ 
+-### Develop
++Unknown keys are rejected with a message that lists the allowed ones. `toolcallbench init` also writes `m4-16gb.yaml` (a plan for a 16 GB Mac), `quant-sweep-qwen3-8b.yaml` (one model at two quantization levels) and `smoke-scripted.yaml` (no model needed).
++
++## Backends
++
++| Backend | Use it for | Notes |
++| --- | --- | --- |
++| `ollama` | Ollama on this machine | Uses the server's token counts and timings for tokens per second |
++| `openai-compat` | llama.cpp (`llama-server --jinja`), LM Studio, vLLM, hosted APIs | Uses `/v1/chat/completions`; reads `usage` and `timings` when the server sends them |
++| `scripted` | Testing the pipeline | Replays reference solutions or imitates a failure; no model needed |
++
++**Hosted APIs.** Put the key in an environment variable and pass its *name*:
+ 
+ ```bash
+-git clone <repo> && cd toolcallbench
++export OPENAI_API_KEY=...
++toolcallbench run --backend openai-compat --host https://api.example.com --model some-model --api-key-env OPENAI_API_KEY
++```
++
++The key is sent as a `Bearer` header. It is never accepted on the command line or in YAML (a value that looks like a key is rejected) and is never written to results, logs or reports. **A hosted API receives every prompt, file content and tool result**, so use a private repo only with a provider you trust.
++
++## Tasks
++
++20 core tasks run by default. Each has a reference solution that `validate-tasks` replays through the real tools.
++
++| Group | Tasks | What it tests |
++| --- | --- | --- |
++| `read` (5) | read a config value, list a folder, find a definition with grep, read a CSV, count members | picking the right read tool and arguments |
++| `edit` (5) | change a value, bump a version, apply a unified diff, add a function, fix the late-fee cap with no tool named | edits that really change the repo |
++| `run` (3) | run the tests and count failures, run a script, run a listing | `run_command` and its allow-list |
++| `chain` (4) | fix a search bug and confirm with tests, read the README and run what it says, locate a class then read it, fix two failing tests | dependent steps; `chain-04` must run the tests after its last edit |
++| `failure` (3) | answer without tools, two independent reads in one step, recover from a missing file | not calling tools when none is needed, parallel calls, recovery |
++
++**4 optional `nested` tasks** (`--groups nested`) test arguments that contain lists of objects, where smaller models often slip on format:
++
++| Task | Tool | What it asks |
++| --- | --- | --- |
++| `nested-01` | `apply_edits` | fix two bugs in two files with one call, then run the tests |
++| `nested-02` | `set_json_values` | change two settings with one call |
++| `nested-03` | either | change JSON settings with no tool named |
++| `nested-04` | `apply_edits` | add a function and its test across two files |
++
++`apply_edits` applies all of its edits or none. Nested tasks are opt-in so the default run stays comparable with earlier versions. `docs/TASK_CATALOG.md` lists every task's prompt and expectations.
++
++## Reading the report
++
++- **Settings**: compare two reports only if these match (`compare` checks for you).
++- **Summary**: pass rate overall and per group, the **95% range**, median tokens per second, median seconds per task, and calls versus the reference solution (1.00 is ideal, 2.00 is twice as many).
++- **Why runs failed**: failure families, then every exact type.
++- **Run-to-run consistency** (with `--repeats` above 1): tasks that always passed, sometimes passed or never passed. Many "sometimes" means the result is noisy.
++- **Where the time went**: seconds per task split into generating, reading the prompt and loading. It shows whether a model is slow because it writes a lot or because its context grows.
++- **Per-task results**: `1/3` is a flaky task, not a hard failure.
++
++A `call_limit` log says how many calls and turns were used and whether the final repository was correct, which separates "too many calls" from "wrong fix".
++
++## Compare two runs
++
++```bash
++toolcallbench compare                  # previous session vs latest
++toolcallbench compare run-a run-b
++```
++
++It prints which settings differ, the pass-rate change per model with a verdict (**better**, **worse** or **no clear difference**, based on the 95% ranges), tasks that flipped, and failure-family changes. It warns when the two sessions ran different task sets. Change one thing between runs (context length, quantization, temperature, `--think`) to learn what it does.
++
++## Ablations
++
++| Question | Run |
++| --- | --- |
++| Does the model do better one call at a time? | `--max-calls-per-turn 1` |
++| Does a smaller tool menu help? | `--tools-offered task` (also a hint, so keep these results separate) |
++| Is it the context size? | `--num-ctx 8192` vs `16384` |
++| Is it the quantization? | `configs/quant-sweep-qwen3-8b.yaml` |
++| Is it the thinking mode? | `--think off` vs `--think on` |
++| Is it luck? | `--repeats 5` and read the consistency table |
++
++## Use your own repo and tasks
++
++```bash
++toolcallbench init --with-tasks        # copies tasks/ and fixtures/repo/ so you can edit them
++toolcallbench validate-tasks --fixture ~/code/my-project-copy --tasks-dir my-tasks
++toolcallbench run --fixture ~/code/my-project-copy --tasks-dir my-tasks --model qwen3:8b
++```
++
++A task is one YAML file:
++
++```yaml
++id: read-01                 # group-NN, must match the group
++group: read                 # read | edit | run | chain | failure | nested
++title: Read one config value
++tools_named: true           # does the prompt name the tool?
++optional: false             # true: only run when named
++version: 1                  # raise it when the task changes meaning
++prompt: |
++  What is loan_days in config/settings.json?
++expect:
++  calls:
++    - tool: read_file
++      args: {path: config/settings.json}
++  answer_regex: ['\b14\b']
++  # after_last_edit: {tool: run_command, contains: pytest}   # require a test run after the last edit
++reference:                  # a solution that must pass
++  - calls:
++      - {tool: read_file, args: {path: config/settings.json}}
++  - final: loan_days is 14.
++```
++
++Run `validate-tasks` with the same `--fixture` and `--tasks-dir` first: it proves each task can be passed. Each session stores a fingerprint of the task set, so `compare` can warn when it changed.
++
++## Choosing models on a 16 GB Mac
++
++The project is tuned for a MacBook M4 with 16 GB, but nothing in it is Mac-only. Plan for about 12 GB of usable model memory: weights plus a KV cache that grows with context length. An 8B model at Q4 with a 16k context and a `q8_0` cache needs about 7 GB; a 14B model is tight at about 11 GB.
++
++| Setting | Recommended |
++| --- | --- |
++| `num_ctx` | 16384 (8192 for Q8 or 14B) |
++| `OLLAMA_FLASH_ATTENTION` | `1` (needed for a quantized KV cache) |
++| `OLLAMA_KV_CACHE_TYPE` | `q8_0` |
++| `OLLAMA_MAX_LOADED_MODELS`, `OLLAMA_NUM_PARALLEL` | `1` |
++| `--think off` | for Qwen3 and other thinking models; compare once with it on |
++
++Sizes are approximate; check `ollama ps`. `docs/MODEL_GUIDE_M4_16GB.md` has the table.
++
++## Privacy and safety
++
++- **Local by default.** Nothing is sent anywhere except to the model server you configure. With a hosted API, prompts and file contents go to that provider.
++- **Throwaway workspace.** Every run works in a fresh copy of the repository in a temp folder. File tools reject paths outside it (`..`, absolute paths, escaping symlinks).
++- **No shell.** Commands are split and run directly; `|`, `>`, `;`, `&&` and `$()` have no special meaning. Only 12 programs are allowed, 20 s per command, 6000 characters of output.
++- **This is a safety net, not a sandbox.** A model can edit a `.py` file and then run it, with your user's permissions. If you use your own repo: use a copy without secrets, never run with `sudo`, and put untrusted models in a VM or container with no network.
++- **Logs contain prompts and file contents.** Do not publish `results/logs/` from a private fixture. `results/` is git-ignored.
++
++Details: `docs/SECURITY.md`.
++
++## Troubleshooting
++
++| Symptom | Fix |
++| --- | --- |
++| `cannot reach http://localhost:11434` | Start the server (`ollama serve`). In a probe, a timeout can also mean the model is still loading: use `--config` and raise `request_timeout` |
++| Probe results change between runs | Run `doctor --probe` with `--config` so temperature and seed are fixed |
++| `no task files (*.yaml) found` | The current folder has its own empty `tasks/` and `fixtures/repo/`, which replace the built-in ones. Run from another folder or delete them |
++| `model 'x' is not installed` | `ollama pull x` |
++| Every run fails with `no_call` | The model may not support tools, or its template is wrong; run `doctor --probe` |
++| Very slow runs with Qwen3 | Add `--think off` |
++| `HTTP 400 ... does not support thinking` | That model has no thinking mode; remove `--think` for it |
++| Mac slow, fans loud | Lower `--num-ctx` to 8192, use a smaller model, close other apps |
++| `X is not set` | `export X=...` in the same shell, then pass `--api-key-env X` |
++| Session exists | Add `--resume` or choose a new `--session` |
++
++## Development
++
++```bash
++git clone https://github.com/herinpatel15/toolcallbench && cd toolcallbench
+ python3 -m venv .venv && source .venv/bin/activate
+ pip install -e ".[dev]"
++toolcallbench validate-tasks
+ python -m pytest
+ ```
+ 
+-## What a report tells you
++Dependencies are `pyyaml`, `jsonschema` and `pytest` (the outcome check runs it); HTTP uses the standard library. Tests use mock Ollama and OpenAI-compatible servers and scripted failure profiles, so they need no model. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
+ 
+-- Pass rate overall and for read, edit, run, chain and failure tasks
+-- Why runs failed (13 failure types, such as `invalid_json`, `text_tool_call`, `patch_failed`)
+-- Tokens per second, seconds per task, and calls compared with a reference solution
+-- Every setting that affects the result (context length, seed, KV cache type, versions)
++**Not covered by automated tests:** real models and real hosted APIs. The mock servers check request and response formats; run a real model on your machine for real numbers.
+ 
+-## Status
++## More documentation
+ 
+-Version 1.0.0. The harness, tasks, scoring, backends (checked against mock servers) and
+-reports are covered by automated tests. **No real model has been benchmarked yet**; run it on
+-your Mac to get the first numbers (`docs/TEST_PLAN.md` lists exactly what was and was not tested).
++Everything above is enough to use the tool. For depth, the `docs/` folder has the product requirements, the exact specification (`TECH_SPEC.md`), architecture diagrams, the test plan, security notes, design decisions, the generated task catalog and the roadmap. `BUILD_FROM_SCRATCH.md` is a day-by-day guide to building a version of this project yourself.
+ 
+-## Documentation
++## Roadmap
+ 
+-| Document | Purpose |
+-| --- | --- |
+-| [BUILD_FROM_SCRATCH.md](BUILD_FROM_SCRATCH.md) | Day-by-day guide to build this project yourself, with all code |
+-| [docs/PRD.md](docs/PRD.md) | Why it exists, who it is for, requirements |
+-| [docs/TECH_SPEC.md](docs/TECH_SPEC.md) | Exact behavior: tools, scoring, config, storage |
+-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Diagrams: context, components, data flow, sequence, states, storage |
+-| [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | What is tested and how requirements map to tests |
+-| [docs/SECURITY.md](docs/SECURITY.md) | What protects you and what does not |
+-| [docs/DECISIONS.md](docs/DECISIONS.md) | Why it is built this way |
+-| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Install, run, read the report, troubleshoot |
+-| [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) | Every command, option and config key |
+-| [docs/MODEL_GUIDE_M4_16GB.md](docs/MODEL_GUIDE_M4_16GB.md) | Memory budget and model choices for 16 GB |
+-| [docs/TASK_CATALOG.md](docs/TASK_CATALOG.md) | All 20 tasks (generated) |
+-| [docs/ROADMAP.md](docs/ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md) | Project housekeeping |
++Next: about 40 tasks, context-stress tasks, a temperature 0.0 vs 0.7 comparison, static HTML charts. Later: direct llama.cpp tuning, an MLX backend, a container sandbox, task packs for other languages. Not planned: a hosted leaderboard or an AI judge.
+ 
+ ## License
+ 
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index a761f91..003e7a4 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -14,7 +14,7 @@ flowchart LR
+         server[Model server<br/>Ollama or llama-server]
+         files[(results/<br/>SQLite, JSONL, reports)]
+         repo[fixtures/repo<br/>sample project]
+-        tasks[tasks/*.yaml<br/>20 tasks]
++        tasks[tasks/*.yaml<br/>24 tasks]
+     end
+     user -->|run, report| cli
+     cli -->|HTTP chat + tools| server
+diff --git a/docs/CLI_REFERENCE.md b/docs/CLI_REFERENCE.md
+index b50a193..cb25f2d 100644
+--- a/docs/CLI_REFERENCE.md
++++ b/docs/CLI_REFERENCE.md
+@@ -9,7 +9,7 @@ Install with `pip install toolcallbench` (Python 3.10 or newer). The command is
+ | Code | Meaning |
+ | --- | --- |
+ | 0 | Success |
+-| 1 | A check failed (`doctor`, `validate-tasks`), the server was unreachable, or `init` would overwrite files |
++| 1 | A check failed (`doctor`, `validate-tasks`), the server was unreachable, `init` would overwrite files, or `compare` / `export` could not find the sessions |
+ | 2 | Bad input: invalid config or task files, no task files found, or a session id that already exists without `--resume` |
+ | 130 | Interrupted with Ctrl+C (use `--resume` to continue) |
+ 
+@@ -22,6 +22,8 @@ toolcallbench doctor --probe --config configs/my-models.yaml
+ toolcallbench run --config configs/my-models.yaml
+ toolcallbench sessions
+ toolcallbench report --session latest
++toolcallbench compare            # previous session vs latest
++toolcallbench export --format csv
+ ```
+ 
+ ## Where files go
+@@ -33,6 +35,8 @@ toolcallbench report --session latest
+ | Results database | `./results/results.sqlite` |
+ | Raw logs | `./results/logs/` |
+ | Reports | `./results/reports/<session>.md` and `.html` |
++| Comparisons | `./results/reports/compare-<A>-vs-<B>.md` |
++| Exports | `./results/exports/<session>.json` or `.csv` |
+ 
+ "`./`" is the folder you run the command in, or `--root` / `--results-dir` if you give them.
+ 
+@@ -46,11 +50,11 @@ without changing anything if a target folder already exists.
+ 
+ ### `list-tasks [--markdown]`
+ 
+-Prints the 20 tasks. `--markdown` prints a table.
++Prints all 24 tasks (20 core, 4 optional `nested`; optional ones are marked). `--markdown` prints a table.
+ 
+ ### `validate-tasks [--tasks IDS] [--groups NAMES]`
+ 
+-Replays each task's reference solution through the checker. `20/20 reference solutions pass`
++Replays each task's reference solution through the checker. `24/24 reference solutions pass`
+ means the tasks and the sample repository are intact. Exit code 1 if any fail.
+ 
+ ### `doctor [--config FILE] [--model NAME]... [--probe] [--backend KIND] [--host URL]`
+@@ -81,7 +85,10 @@ override the config file.
+ | `--max-calls N` | Tool calls allowed per task | 12 |
+ | `--max-turns N` | Model turns allowed per task | 10 |
+ | `--tasks IDS` | Comma-separated task ids, e.g. `read-01,edit-02` | all |
+-| `--groups NAMES` | Comma-separated groups: `read,edit,run,chain,failure` | all |
++| `--groups NAMES` | Comma-separated groups: `read,edit,run,chain,failure,nested` | the 20 core tasks (naming `nested` or a nested task id adds the optional tasks) |
++| `--tools-offered all\|task` | `all` offers the core tools to every task; `task` offers only the tools the task needs (a hint, so an ablation) | `all` |
++| `--max-calls-per-turn N` | Run only the first N tool calls of each reply; 0 means no limit | 0 |
++| `--api-key-env NAME` | Name of an environment variable that holds the API key (`openai-compat` only). The key itself is never given here | none (`TOOLCALLBENCH_API_KEY` is used if set) |
+ | `--session ID` | Name of this run | start time |
+ | `--resume` | Continue a session and skip runs already stored | off |
+ | `--kv-cache-type T` | KV cache type your server uses (recorded only) | `f16` |
+@@ -92,6 +99,14 @@ override the config file.
+ If the session id already exists and `--resume` is not given, `run` prints an error and exits
+ with code 2. If the server cannot be reached it exits with code 1.
+ 
++### `compare [SESSION_A] [SESSION_B]`
++
++Compares two sessions. With no arguments it compares the previous session with the latest. It shows which settings differ (so you know whether the comparison is fair), the pass-rate change per model with a verdict (better, worse, or no clear difference based on the 95% ranges), tasks that flipped, and failure-family changes. It warns when the two sessions ran different task sets. Writes `results/reports/compare-A-vs-B.md`. Exit code 1 if fewer than two sessions exist or an id is unknown.
++
++### `export [--session ID|latest] [--format json|csv] [--output FILE|-]`
++
++Writes every run of a session as JSON (session settings plus runs) or CSV (one row per run: model, task, passed, failure type, tokens, timings). Default file: `results/exports/<session>.<format>`; `-` prints to the terminal.
++
+ ### `report [--session ID|latest] [--print]`
+ 
+ Builds the Markdown and HTML report from stored results. `--print` also prints the Markdown.
+@@ -113,6 +128,9 @@ settings:                          # all optional
+   max_calls: 12
+   max_turns: 10
+   request_timeout: 600             # seconds per request; raise it for slow or thinking models
++  tools_offered: all               # all | task
++  max_calls_per_turn: 0            # 0 = no limit
++api_key_env: OPENAI_API_KEY        # NAME of an environment variable (openai-compat only), never the key
+ declared_server:                   # recorded in the report, not enforced
+   kv_cache_type: q8_0
+   flash_attention: true
+@@ -137,5 +155,5 @@ always wins over the same setting in the file.
+ ## Failure types
+ 
+ `invalid_json`, `invalid_args`, `unknown_tool`, `text_tool_call`, `no_call`, `unneeded_call`,
+-`call_limit`, `not_parallel`, `wrong_tool`, `too_few_calls`, `patch_failed`, `wrong_args`, and
+-`outcome_mismatch`. `TECH_SPEC.md` defines each one and the order they are checked in.
++`call_limit`, `not_parallel`, `wrong_tool`, `too_few_calls`, `no_confirm_run`, `patch_failed`,
++`wrong_args`, and `outcome_mismatch` (14). `TECH_SPEC.md` defines each one and the order they are checked in.
+diff --git a/docs/DECISIONS.md b/docs/DECISIONS.md
+index 0994e44..86dd1c9 100644
+--- a/docs/DECISIONS.md
++++ b/docs/DECISIONS.md
+@@ -68,3 +68,21 @@ what it costs.
+ - **Decision:** Server errors are stored as `status=error` and excluded from pass rates; three in a row stop that model.
+ - **Why:** A crashed server must not look like a bad model.
+ - **Cost:** The report needs an Errors column.
++
++## ADR-012: Nested-argument tasks are opt-in
++
++- **Decision:** The four `nested` tasks have `optional: true` and run only when named.
++- **Why:** The default run stays the same 20 tasks, so results from earlier versions remain comparable.
++- **Cost:** People must ask for them (`--groups nested`).
++
++## ADR-013: API keys come from an environment variable, by name
++
++- **Decision:** `--api-key-env NAME` / `api_key_env:` hold the variable's name; a value that looks like a key is rejected.
++- **Why:** Keys on the command line end up in shell history; keys in YAML end up in git.
++- **Cost:** One extra step to export the variable.
++
++## ADR-014: Fingerprint the task set
++
++- **Decision:** Each session stores `tasks_sha`; `compare` warns when it differs. Changed tasks get a new `version`.
++- **Why:** A changed task silently changes what a pass rate means (`chain-04` is version 2).
++- **Cost:** Older sessions have no fingerprint and compare without the check.
+diff --git a/docs/PRD.md b/docs/PRD.md
+index dd393ba..23d8aa2 100644
+--- a/docs/PRD.md
++++ b/docs/PRD.md
+@@ -50,7 +50,7 @@ loop that never stops. Each one breaks an agent, and none show up in a general s
+ | FR-2 | Support Ollama, OpenAI-compatible servers (llama.cpp, LM Studio, vLLM) and a scripted fake model | Must |
+ | FR-3 | Offer six tools with JSON Schema and validate every tool call before running it | Must |
+ | FR-4 | Run tools only in a throwaway copy of a sample repository; allow-list commands | Must |
+-| FR-5 | Score deterministically; classify every failure into one of 13 types | Must |
++| FR-5 | Score deterministically; classify every failure into one of 14 types | Must |
+ | FR-6 | Repeat each task N times with different seeds; record all settings | Must |
+ | FR-7 | Store results in SQLite and keep full JSONL transcripts | Must |
+ | FR-8 | Resume an interrupted session without repeating finished runs | Must |
+@@ -77,7 +77,7 @@ loop that never stops. Each one breaks an agent, and none show up in a general s
+ | Metric | Target |
+ | --- | --- |
+ | Tasks with a passing reference solution | 20 of 20 |
+-| Each failure type detectable by a scripted profile | 13 of 13 (see `TEST_PLAN.md`) |
++| Each failure type detectable by a scripted profile | 14 of 14 (see `TEST_PLAN.md`) |
+ | A full run of one 8B model, 20 tasks x 3 repeats, on the owner's Mac | measured by the owner; record the time in the report |
+ | Owner can reproduce the repo from `BUILD_FROM_SCRATCH.md` | all tests pass |
+ 
+diff --git a/docs/ROADMAP.md b/docs/ROADMAP.md
+index 2296efa..7e521bf 100644
+--- a/docs/ROADMAP.md
++++ b/docs/ROADMAP.md
+@@ -3,14 +3,17 @@
+ Ideas are ordered by value for the owner's goal: choosing and tuning a local model for
+ agent work. None are promised.
+ 
+-## Next (v0.2)
++## Delivered in 1.1.0
+ 
+-- **Run history compare**: `toolcallbench compare SESSION_A SESSION_B` with a table of differences.
+-- **Confidence intervals**: show a range, not only a percentage, for each pass rate.
+-- **More tasks**: 40 tasks, including multi-file edits and longer chains.
++Run history compare, pass-rate ranges, JSON/CSV export, nested-argument tasks, one-call-per-turn
++and tools-offered ablations, test-run-after-edit check, hosted API keys. See `CHANGELOG.md`.
++
++## Next
++
++- **More tasks**: grow from 24 to about 40, with longer chains and more multi-file edits.
+ - **Context stress tasks**: a large file that forces the model to use `start_line` / `end_line`.
+ - **Sampling variants**: run at temperature 0.0 and 0.7 and report the gap.
+-- **Check test runs after edits**: for tasks that say "run the tests to confirm" (chain-01, chain-04), require a test run after the last edit. Ship as a new task version so old results are not compared with new ones. See `docs/issues/edit-4-issue/ISSUE_edit-failures.md`.
++- **Static HTML charts** with per-run drill-down to the transcript.
+ 
+ ## Later
+ 
+@@ -18,7 +21,6 @@ agent work. None are promised.
+ - **MLX backend** for Apple silicon.
+ - **Container sandbox**: run `run_command` inside a container for untrusted models.
+ - **Task packs**: community packs for other languages (JavaScript, Go).
+-- **Static HTML dashboard** with charts and per-run drill-down to the transcript.
+ 
+ ## Not planned
+ 
+diff --git a/docs/SECURITY.md b/docs/SECURITY.md
+index bcb18e6..9bac019 100644
+--- a/docs/SECURITY.md
++++ b/docs/SECURITY.md
+@@ -31,7 +31,8 @@ If you point `--fixture` at **your own repository**, the same limits apply. Do t
+ 
+ ## Data handling
+ 
+-- Nothing is sent anywhere except to the model server you configure.
++- Nothing is sent anywhere except to the model server you configure. With a **hosted** API (`--backend openai-compat --host https://...`) every prompt, file content from the fixture and tool result leaves your machine and goes to that provider. Use a private fixture only with a server you trust.
++- API keys: pass only the **name** of an environment variable (`--api-key-env NAME`). The key is sent as a `Bearer` header, is never accepted on the command line or in YAML (a value that looks like a key is rejected), and is not written to results, logs or reports. The report only says whether a key was set.
+ - Transcripts in `results/logs/` contain full prompts and file contents from the fixture; do not publish them if your fixture is private.
+ - `results/` is in `.gitignore`.
+ 
+diff --git a/docs/TASK_CATALOG.md b/docs/TASK_CATALOG.md
+index 6b26ac1..3b93dc4 100644
+--- a/docs/TASK_CATALOG.md
++++ b/docs/TASK_CATALOG.md
+@@ -2,30 +2,34 @@
+ 
+ Generated by `scripts/make_task_catalog.py` from `tasks/*.yaml`. Do not edit by hand.
+ 
+-20 tasks in 5 groups. Every task has a reference solution that is replayed by `toolcallbench validate-tasks`, so each one is known to be passable.
+-
+-| Task | Group | Title | Tool named | Reference calls |
+-| --- | --- | --- | --- | --- |
+-| chain-01 | chain | Fix the title search and confirm with tests | no | 3 |
+-| chain-02 | chain | Read the README, then run what it says | no | 2 |
+-| chain-03 | chain | Locate a class, then read it | no | 2 |
+-| chain-04 | chain | Fix both failing tests | no | 6 |
+-| edit-01 | edit | Change one config value | yes | 2 |
+-| edit-02 | edit | Bump the package version | yes | 1 |
+-| edit-03 | edit | Change a value with a unified diff | yes | 2 |
+-| edit-04 | edit | Add a function to a file | yes | 2 |
+-| edit-05 | edit | Fix the late-fee cap (no tool named) | no | 2 |
+-| failure-01 | failure | Answer directly without tools | no | 0 |
+-| failure-02 | failure | Two independent reads in one step | no | 2 |
+-| failure-03 | failure | Recover from a missing file | no | 3 |
+-| read-01 | read | Read one config value | yes | 1 |
+-| read-02 | read | List a directory | yes | 1 |
+-| read-03 | read | Find a definition with grep | yes | 1 |
+-| read-04 | read | Read a CSV and answer a question | yes | 1 |
+-| read-05 | read | Read members and count them | yes | 1 |
+-| run-01 | run | Run the tests and count failures | yes | 1 |
+-| run-02 | run | Run a script and report a number | yes | 1 |
+-| run-03 | run | Run a shell-style listing | yes | 1 |
++24 tasks in 6 groups: 20 core tasks in a default run and 4 optional ones. Every task has a reference solution that is replayed by `toolcallbench validate-tasks`, so each one is known to be passable.
++
++| Task | Group | Title | Tool named | Reference calls | Default run |
++| --- | --- | --- | --- | --- | --- |
++| chain-01 | chain | Fix the title search and confirm with tests | no | 3 | yes |
++| chain-02 | chain | Read the README, then run what it says | no | 2 | yes |
++| chain-03 | chain | Locate a class, then read it | no | 2 | yes |
++| chain-04 | chain | Fix both failing tests | no | 6 | yes |
++| edit-01 | edit | Change one config value | yes | 2 | yes |
++| edit-02 | edit | Bump the package version | yes | 1 | yes |
++| edit-03 | edit | Change a value with a unified diff | yes | 2 | yes |
++| edit-04 | edit | Add a function to a file | yes | 2 | yes |
++| edit-05 | edit | Fix the late-fee cap (no tool named) | no | 2 | yes |
++| failure-01 | failure | Answer directly without tools | no | 0 | yes |
++| failure-02 | failure | Two independent reads in one step | no | 2 | yes |
++| failure-03 | failure | Recover from a missing file | no | 3 | yes |
++| nested-01 | nested | Fix both bugs with one apply_edits call | yes | 4 | no |
++| nested-02 | nested | Change two settings with one set_json_values call | yes | 2 | no |
++| nested-03 | nested | Change JSON settings, no tool named | no | 2 | no |
++| nested-04 | nested | Add a function and its test in one apply_edits call | yes | 4 | no |
++| read-01 | read | Read one config value | yes | 1 | yes |
++| read-02 | read | List a directory | yes | 1 | yes |
++| read-03 | read | Find a definition with grep | yes | 1 | yes |
++| read-04 | read | Read a CSV and answer a question | yes | 1 | yes |
++| read-05 | read | Read members and count them | yes | 1 | yes |
++| run-01 | run | Run the tests and count failures | yes | 1 | yes |
++| run-02 | run | Run a script and report a number | yes | 1 | yes |
++| run-03 | run | Run a shell-style listing | yes | 1 | yes |
+ 
+ ## Read
+ 
+@@ -250,11 +254,14 @@ Prompt:
+ > Two tests in this repository fail. Fix the code so that the whole test suite passes,
+ > and run the suite at the end to confirm.
+ 
++Task version 2: results from earlier versions are not comparable.
++
+ Passes when:
+ 
+ - call `edit_file or apply_patch` with {'path': 'src/shelf/catalog.py'}
+ - call `edit_file or apply_patch` with {'path': 'src/shelf/fees.py'}
+ - call `run_command` with {'command': {'contains': 'pytest'}}
++- `run_command` must be called again after the last successful edit
+ - after the run, `python -m pytest -q` exits with 0
+ 
+ ## Failure
+@@ -298,3 +305,82 @@ Passes when:
+ 
+ - call `read_file` with {'path': 'config/settings.json'}
+ - the answer mentions `USD`
++
++## Nested
++
++Optional. Tools whose arguments are nested (a list of objects). Not in a default run; select with `--groups nested`.
++
++### nested-01: Fix both bugs with one apply_edits call
++
++Prompt:
++
++> Two tests in this repository fail. Use the apply_edits tool, once, to fix both bugs
++> (they are in different files), then run the test suite to confirm that everything passes.
++
++Extra tools offered: `apply_edits`
++
++Passes when:
++
++- call `apply_edits`
++- call `run_command` with {'command': {'contains': 'pytest'}}
++- `run_command` must be called again after the last successful edit
++- must not use `edit_file`, `apply_patch`
++- after the run, `python -m pytest -q` exits with 0
++
++### nested-02: Change two settings with one set_json_values call
++
++Prompt:
++
++> Use the set_json_values tool, once, to change loan_days to 21 and max_loans_per_member to 5
++> in config/settings.json.
++
++Extra tools offered: `set_json_values`
++
++Passes when:
++
++- call `set_json_values` with {'path': 'config/settings.json'}
++- must not use `edit_file`, `apply_patch`
++- `config/settings.json` contains `"loan_days": 21`
++- `config/settings.json` contains `"max_loans_per_member": 5`
++- `config/settings.json` no longer contains `"loan_days": 14`
++- `config/settings.json` no longer contains `"max_loans_per_member": 3`
++- after the run, `python -c import json; d = json.load(open('config/settings.json')); assert d['loan_days'] == 21 and d['max_loans_per_member'] == 5 and d['late_fee_per_day'] == 0.25` exits with 0
++
++### nested-03: Change JSON settings, no tool named
++
++Prompt:
++
++> In config/settings.json, change currency to EUR and max_late_fee to 15.0. Leave every other setting as it is.
++
++Extra tools offered: `apply_edits`, `set_json_values`
++
++Passes when:
++
++- call `set_json_values or apply_edits or edit_file or apply_patch`
++- `config/settings.json` contains `"currency": "EUR"`
++- `config/settings.json` contains `"max_late_fee": 15.0`
++- `config/settings.json` no longer contains `"currency": "USD"`
++- `config/settings.json` no longer contains `"max_late_fee": 10.0`
++- after the run, `python -c import json; d = json.load(open('config/settings.json')); assert d['currency'] == 'EUR' and d['max_late_fee'] == 15.0 and d['loan_days'] == 14 and d['late_fee_per_day'] == 0.25` exits with 0
++
++### nested-04: Add a function and its test in one apply_edits call
++
++Prompt:
++
++> Use the apply_edits tool, once, to do two things. Add a function shout(text) at the end of src/shelf/utils.py;
++> it returns the text in upper case followed by an exclamation mark, so shout('hi') returns 'HI!'.
++> Then, in tests/test_utils.py, import shout and add a test named test_shout that checks it.
++> Run tests/test_utils.py at the end to confirm that it passes.
++
++Extra tools offered: `apply_edits`
++
++Passes when:
++
++- call `apply_edits`
++- call `run_command` with {'command': {'contains': 'pytest'}}
++- `run_command` must be called again after the last successful edit
++- must not use `edit_file`, `apply_patch`
++- `tests/test_utils.py` contains `def test_shout`
++- `tests/test_utils.py` contains `shout`
++- after the run, `python -m pytest -q tests/test_utils.py` exits with 0
++- after the run, `python -c import sys; sys.path.insert(0, 'src'); from shelf.utils import shout; assert shout('hi') == 'HI!'` exits with 0
+diff --git a/docs/TECH_SPEC.md b/docs/TECH_SPEC.md
+index 119ce74..b9ed51d 100644
+--- a/docs/TECH_SPEC.md
++++ b/docs/TECH_SPEC.md
+@@ -34,6 +34,17 @@ strings and each tool result gets a `tool_call_id`.
+ | `apply_patch` | `patch` | none | Unified diff; existing files only; line numbers in `@@` headers are not enforced |
+ | `run_command` | `command` | none | No shell; allow-list below |
+ 
++**Extra tools (nested arguments).** Only tasks that list them in `extra_tools` are offered these:
++
++| Tool | Arguments | Notes |
++| --- | --- | --- |
++| `apply_edits` | `edits`: list of `{path, old_text, new_text}` | All or nothing: if any edit does not apply, no file is changed. Edits in one file apply in order |
++| `set_json_values` | `path`, `updates`: list of `{key_path: [string], value}` | Every key must already exist; the file is rewritten with 2-space indent |
++
++A tool that was not offered to the task is `unknown_tool` even if it exists. With
++`--tools-offered task` only the tools a task needs are offered (tasks that need none keep the
++six core tools, so a wrong call still shows).
++
+ All schemas set `additionalProperties: false`, so an unexpected argument is an
+ `invalid_args` failure.
+ 
+@@ -109,6 +120,7 @@ A failed run gets exactly one type:
+ | 2 | `unneeded_call` | called a tool when none was needed |
+ | 2 | `no_call` | answered without calling a needed tool |
+ | 2 | `too_few_calls` | stopped before enough calls |
++| 2 | `no_confirm_run` | `expect.after_last_edit` is set and no test run came after the last successful edit |
+ | 2 | `wrong_tool` | wrong or forbidden tool |
+ | 2 | `not_parallel` | needed calls were made one at a time |
+ | 3 | `patch_failed` | outcome wrong and an edit call was rejected |
+@@ -124,7 +136,10 @@ Text tool calls are detected with a regular expression on the final reply: `<too
+ 
+ ```yaml
+ id: read-01                 # group-NN, group must match the prefix
+-group: read                 # read | edit | run | chain | failure
++group: read                 # read | edit | run | chain | failure | nested
++optional: false             # true: only run when named (--groups / --tasks)
++version: 1                  # raise when a task changes meaning; results of different versions are not comparable
++extra_tools: []             # e.g. [apply_edits]
+ title: Read one config value
+ tools_named: true           # does the prompt name the tool?
+ prompt: |
+@@ -140,6 +155,10 @@ reference:                  # a solution that must pass; last step is "final"
+   - final: loan_days is 14.
+ ```
+ 
++`expect.after_last_edit: {tool: run_command, contains: pytest}` requires such a call after the last
++successful edit call (no successful edit means the check passes). The session settings store
++`tasks_sha`, a fingerprint of id, version, prompt, expect and extra tools of the tasks that ran; `compare` warns when it differs.
++
+ Files are validated with a JSON Schema plus extra rules (id prefix, known `expect` keys,
+ last reference step is a final answer). `toolcallbench validate-tasks` replays every
+ reference through the real tools and checker.
+diff --git a/docs/TEST_PLAN.md b/docs/TEST_PLAN.md
+index 8697f09..0d200b6 100644
+--- a/docs/TEST_PLAN.md
++++ b/docs/TEST_PLAN.md
+@@ -36,7 +36,7 @@ python scripts/verify_build_guide.py   # rebuild from BUILD_FROM_SCRATCH.md and
+ | FR-2 backends | `test_http_backends` (Ollama, OpenAI-compatible), scripted backend used everywhere |
+ | FR-3 six tools, validation | `test_tools::test_six_tools_with_object_schemas`, `test_validate_arguments` |
+ | FR-4 sandbox | `test_tools::test_read_file_errors`, `test_run_command_allowlist_and_confinement`, `test_output_is_truncated`, `test_patching` |
+-| FR-5 scoring, 13 failure types | `test_checks` (profiles and hand-built transcripts), `test_failure_types_are_all_documented` |
++| FR-5 scoring, 14 failure types | `test_checks` (profiles and hand-built transcripts), `test_failure_types_are_all_documented` |
+ | FR-6 repeats, settings recorded | `test_config::test_seed_changes_per_repeat`, `test_cli::test_run_against_mock_ollama` (settings JSON) |
+ | FR-7 SQLite and JSONL | `test_store_report::test_store_roundtrip_and_resume_keys`, `test_jsonl_log_has_messages_and_summary` |
+ | FR-8 resume | `test_cli::test_scripted_run_report_and_resume`, `test_resume_after_partial` |
+@@ -62,6 +62,7 @@ python scripts/verify_build_guide.py   # rebuild from BUILD_FROM_SCRATCH.md and
+ | Calls a tool when none is needed | `wrong_tool` on `failure-01` | `unneeded_call` |
+ | Edit that does not apply | `bad_edit` | `patch_failed` |
+ | Parallel calls sent one per turn | hand-built transcript | `not_parallel` |
++| No test run after the last edit | hand-built transcript (`test_features`) | `no_confirm_run` |
+ | Stops early | hand-built transcript | `too_few_calls` |
+ | Wrong answer, right call | hand-built transcript | `outcome_mismatch` |
+ | Wrong path | hand-built transcript | `wrong_args` |
+diff --git a/docs/USER_GUIDE.md b/docs/USER_GUIDE.md
+index 203509b..1a0c83d 100644
+--- a/docs/USER_GUIDE.md
++++ b/docs/USER_GUIDE.md
+@@ -60,12 +60,14 @@ The full list of options is in [CLI_REFERENCE.md](CLI_REFERENCE.md).
+ | Command | Purpose |
+ | --- | --- |
+ | `init [DIR] [--with-tasks]` | Create example configs (and optionally editable tasks) |
+-| `list-tasks [--markdown]` | Show the 20 tasks |
++| `list-tasks [--markdown]` | Show the 24 tasks (20 core, 4 optional) |
+ | `validate-tasks [--tasks ids] [--groups names]` | Replay reference solutions |
+ | `doctor [--config FILE] [--model NAME] [--probe] [--backend K] [--host URL]` | Check setup; probe a model |
+ | `run` | Run the benchmark; key options below |
+ | `report [--session ID] [--print]` | Rebuild a report from stored results |
+ | `sessions` | List stored sessions |
++| `compare [A] [B]` | Compare two sessions (default: previous vs latest) |
++| `export [--format json\|csv]` | Write a session's runs to a file |
+ 
+ Key `run` options: `--config FILE`, `--backend ollama|openai-compat|scripted`, `--host URL`,
+ `--model NAME` (repeat for several), `--think on|off`, `--num-ctx N`, `--temperature X`,
+@@ -74,13 +76,49 @@ Key `run` options: `--config FILE`, `--backend ollama|openai-compat|scripted`, `
+ 
+ ## Reading the report
+ 
+-- **Settings** table: compare two reports only if these match.
++- **Settings** table: compare two reports only if these match (`compare` checks this for you).
++- **95% range** next to each pass rate: how far it could move on a rerun. If two models' ranges overlap, the run cannot tell them apart; use more `--repeats`.
++- **Run-to-run consistency** (with repeats above 1): tasks that always passed, sometimes passed, never passed.
+ - **Summary**: pass rate overall and per group, median tokens per second, median seconds per task, and calls versus the reference (1.00 is ideal; 2.00 means twice as many calls).
+ - **Errors**: runs where the server failed. They are not in the pass rate.
+ - **Why runs failed**: right after the summary. Failures are grouped into wrong tool, bad arguments, no real call, over budget and wrong result, then listed by exact type. Each group needs a different fix, so read it together with the pass rate.
+ - **Failure types**: the exact types. A model with many `invalid_json` failures has a formatting problem; many `no_call` means it answers from memory instead of using tools; many `outcome_mismatch` means it calls tools but reaches wrong results.
+ - **Per-task results**: cells are passed/scored. With 3 repeats, `1/3` is a flaky task, not a hard failure.
+ 
++## Compare two runs
++
++```bash
++toolcallbench compare                 # previous session vs latest
++toolcallbench compare run-a run-b     # any two
++```
++
++It lists the settings that differ first, then the pass-rate change with a verdict, tasks that flipped and failure-family changes. Change one thing between the two runs (context length, quantization, temperature) to learn what that thing does.
++
++## Nested-argument tasks and ablations
++
++```bash
++toolcallbench run --model qwen3:8b --groups nested                 # 4 tasks with list-of-object arguments
++toolcallbench run --model qwen3:8b --groups nested --max-calls-per-turn 1
++toolcallbench run --model qwen3:8b --tools-offered task
++```
++
++`--max-calls-per-turn 1` tests whether a small model does better one call at a time. `--tools-offered task` shows how much a smaller menu of tools helps; it also gives hints, so do not mix it with normal results.
++
++## Hosted OpenAI-compatible APIs
++
++```bash
++export OPENAI_API_KEY=...             # the key stays in your shell
++toolcallbench run --backend openai-compat --host https://api.example.com --model some-model --api-key-env OPENAI_API_KEY
++```
++
++Prompts and file contents are sent to that provider. See `SECURITY.md`.
++
++## Export
++
++```bash
++toolcallbench export --session latest --format csv      # results/exports/<session>.csv
++```
++
+ ## Compare quantization levels
+ 
+ ```bash
+diff --git a/scripts/make_task_catalog.py b/scripts/make_task_catalog.py
+index 47f1df2..77cad9a 100644
+--- a/scripts/make_task_catalog.py
++++ b/scripts/make_task_catalog.py
+@@ -17,6 +17,7 @@ GROUP_NOTES = {
+     "run": "Run allowed commands and report what they print.",
+     "chain": "Several dependent steps. No tool is named; the model must plan.",
+     "failure": "Robustness: answering without tools, parallel calls, and recovering from a wrong path.",
++    "nested": "Optional. Tools whose arguments are nested (a list of objects). Not in a default run; select with `--groups nested`.",
+ }
+ 
+ 
+@@ -28,6 +29,9 @@ def describe_expect(expect: dict) -> list[str]:
+         lines.append(f"call `{tool}`" + (f" with {args}" if args else ""))
+     if expect.get("ordered"):
+         lines.append("calls must happen in this order")
++    for req in expect.get("after_last_edit", []):
++        tool = req["tool"] if isinstance(req["tool"], str) else " or ".join(req["tool"])
++        lines.append(f"`{tool}` must be called again after the last successful edit")
+     if expect.get("parallel"):
+         lines.append("the calls must be requested together in one step")
+     if expect.get("no_tool_calls"):
+@@ -50,23 +54,32 @@ def describe_expect(expect: dict) -> list[str]:
+ 
+ def render() -> str:
+     tasks = load_tasks(ROOT / "src" / "toolcallbench" / "data" / "tasks")
++    core = [t for t in tasks if not t.optional]
+     out = [
+         "# Task catalog",
+         "",
+         "Generated by `scripts/make_task_catalog.py` from `tasks/*.yaml`. Do not edit by hand.",
+         "",
+-        f"{len(tasks)} tasks in {len(GROUPS)} groups. Every task has a reference solution that is replayed by "
++        f"{len(tasks)} tasks in {len(GROUPS)} groups: {len(core)} core tasks in a default run and "
++        f"{len(tasks) - len(core)} optional ones. Every task has a reference solution that is replayed by "
+         "`toolcallbench validate-tasks`, so each one is known to be passable.",
+         "",
+-        "| Task | Group | Title | Tool named | Reference calls |",
+-        "| --- | --- | --- | --- | --- |",
++        "| Task | Group | Title | Tool named | Reference calls | Default run |",
++        "| --- | --- | --- | --- | --- | --- |",
++    ]
++    out += [
++        f"| {t.id} | {t.group} | {t.title} | {'yes' if t.tools_named else 'no'} | {t.baseline_calls} | {'no' if t.optional else 'yes'} |"
++        for t in tasks
+     ]
+-    out += [f"| {t.id} | {t.group} | {t.title} | {'yes' if t.tools_named else 'no'} | {t.baseline_calls} |" for t in tasks]
+     for group in GROUPS:
+         out += ["", f"## {group.title()}", "", GROUP_NOTES[group]]
+         for t in (t for t in tasks if t.group == group):
+             out += ["", f"### {t.id}: {t.title}", "", "Prompt:", ""]
+             out += [f"> {line}" if line else ">" for line in t.prompt.splitlines()]
++            if t.extra_tools:
++                out += ["", "Extra tools offered: " + ", ".join(f"`{n}`" for n in t.extra_tools)]
++            if t.version > 1:
++                out += ["", f"Task version {t.version}: results from earlier versions are not comparable."]
+             out += ["", "Passes when:", ""]
+             out += [f"- {line}" for line in describe_expect(t.expect)]
+     return "\n".join(out) + "\n"
+diff --git a/src/toolcallbench/__init__.py b/src/toolcallbench/__init__.py
+index 6607cdc..8ad18e8 100644
+--- a/src/toolcallbench/__init__.py
++++ b/src/toolcallbench/__init__.py
+@@ -1,3 +1,3 @@
+ """ToolCallBench: measure how reliably local LLMs call tools on your own repo and hardware."""
+ 
+-__version__ = "1.0.3"
++__version__ = "1.1.0"
+diff --git a/src/toolcallbench/backends/__init__.py b/src/toolcallbench/backends/__init__.py
+index 802fcfc..aa92dbe 100644
+--- a/src/toolcallbench/backends/__init__.py
++++ b/src/toolcallbench/backends/__init__.py
+@@ -33,11 +33,12 @@ def make_backend(
+     timeout: float,
+     tasks: list[Task],
+     profile: str = "oracle",
++    api_key: str = "",
+ ) -> Backend:
+     if kind == "ollama":
+         return OllamaBackend(model, host=host, options=options, think=think, timeout=timeout)
+     if kind == "openai-compat":
+-        return OpenAICompatBackend(model, base_url=host, options=options, timeout=timeout)
++        return OpenAICompatBackend(model, base_url=host, options=options, timeout=timeout, api_key=api_key)
+     if kind == "scripted":
+         return ScriptedBackend(tasks, profile=profile)
+     raise ValueError(f"unknown backend '{kind}'; choose from {', '.join(BACKEND_KINDS)}")
+diff --git a/src/toolcallbench/backends/base.py b/src/toolcallbench/backends/base.py
+index 8363c52..a24efaf 100644
+--- a/src/toolcallbench/backends/base.py
++++ b/src/toolcallbench/backends/base.py
+@@ -27,9 +27,11 @@ class Backend:
+         return {"backend": self.name}
+ 
+ 
+-def request_json(method: str, url: str, payload: dict[str, Any] | None, timeout: float) -> Any:
++def request_json(
++    method: str, url: str, payload: dict[str, Any] | None, timeout: float, headers: dict[str, str] | None = None
++) -> Any:
+     data = json.dumps(payload).encode("utf-8") if payload is not None else None
+-    request = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
++    request = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json", **(headers or {})})
+     try:
+         with urllib.request.urlopen(request, timeout=timeout) as response:
+             return json.loads(response.read().decode("utf-8"))
+diff --git a/src/toolcallbench/backends/openai_compat.py b/src/toolcallbench/backends/openai_compat.py
+index a6a3c7e..b639ba3 100644
+--- a/src/toolcallbench/backends/openai_compat.py
++++ b/src/toolcallbench/backends/openai_compat.py
+@@ -51,17 +51,23 @@ class OpenAICompatBackend(Backend):
+         base_url: str = "http://localhost:8080",
+         options: dict[str, Any] | None = None,
+         timeout: float = 300.0,
++        api_key: str = "",
+     ):
+         self.model = model
++        self._api_key = api_key  # sent as a bearer token; never written to results or logs
+         self.base_url = base_url.rstrip("/")
+         self.options = dict(options or {})
+         self.timeout = timeout
+ 
++    @property
++    def _headers(self) -> dict[str, str]:
++        return {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
++
+     def check(self) -> None:
+-        request_json("GET", f"{self.base_url}/v1/models", None, self.timeout)
++        request_json("GET", f"{self.base_url}/v1/models", None, self.timeout, self._headers)
+ 
+     def describe(self) -> dict[str, Any]:
+-        return {"backend": self.name, "host": self.base_url}
++        return {"backend": self.name, "host": self.base_url, "api_key": "set" if self._api_key else "none"}
+ 
+     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> BackendResponse:
+         payload: dict[str, Any] = {
+@@ -74,7 +80,7 @@ class OpenAICompatBackend(Backend):
+             if key in self.options:
+                 payload[key] = self.options[key]
+         started = time.monotonic()
+-        data = request_json("POST", f"{self.base_url}/v1/chat/completions", payload, self.timeout)
++        data = request_json("POST", f"{self.base_url}/v1/chat/completions", payload, self.timeout, self._headers)
+         elapsed = time.monotonic() - started
+         try:
+             message = data["choices"][0]["message"]
+diff --git a/src/toolcallbench/backends/scripted.py b/src/toolcallbench/backends/scripted.py
+index 90bf16c..183f9c4 100644
+--- a/src/toolcallbench/backends/scripted.py
++++ b/src/toolcallbench/backends/scripted.py
+@@ -67,6 +67,10 @@ class ScriptedBackend(Backend):
+             for call in calls:
+                 if call.name == "edit_file":
+                     call.arguments = {**call.arguments, "old_text": "THIS TEXT IS NOT IN THE FILE"}
++                elif call.name == "apply_edits":
++                    call.arguments = {"edits": [{**e, "old_text": "THIS TEXT IS NOT IN THE FILE"} for e in call.arguments.get("edits", [])]}
++                elif call.name == "set_json_values":
++                    call.arguments = {**call.arguments, "updates": [{**u, "key_path": ["no_such_key"]} for u in call.arguments.get("updates", [])]}
+                 elif call.name == "apply_patch":
+                     call.arguments = {"patch": "--- a/missing.py\n+++ b/missing.py\n@@ -1,1 +1,1 @@\n-x\n+y\n"}
+             return content, calls
+diff --git a/src/toolcallbench/checks.py b/src/toolcallbench/checks.py
+index 4eb8290..80f43d3 100644
+--- a/src/toolcallbench/checks.py
++++ b/src/toolcallbench/checks.py
+@@ -12,7 +12,7 @@ from typing import Any
+ from .models import CallRecord, CheckResult, Task, Transcript
+ from .tools import run_trusted
+ 
+-EDIT_TOOLS = {"edit_file", "apply_patch"}
++EDIT_TOOLS = {"edit_file", "apply_patch", "apply_edits", "set_json_values"}
+ 
+ FAILURE_TYPES = (
+     "invalid_json",
+@@ -25,6 +25,7 @@ FAILURE_TYPES = (
+     "not_parallel",
+     "wrong_tool",
+     "too_few_calls",
++    "no_confirm_run",
+     "patch_failed",
+     "wrong_args",
+     "outcome_mismatch",
+@@ -85,6 +86,15 @@ def _assign(reqs: list[dict[str, Any]], calls: list[CallRecord], ordered: bool,
+     return None
+ 
+ 
++def _after_last_edit_ok(reqs: list[dict[str, Any]], calls: list[CallRecord]) -> bool:
++    """Every requirement is met by a valid call that comes after the last edit that worked. No edit: nothing to check."""
++    edits = [c.index for c in calls if c.tool in EDIT_TOOLS and c.valid and c.ok]
++    if not edits:
++        return True
++    later = [c for c in calls if c.index > max(edits)]
++    return all(any(_tool_matches(r, c) and _args_match(r, c) for c in later) for r in reqs)
++
++
+ def _parallel_ok(reqs: list[dict[str, Any]], calls: list[CallRecord]) -> bool:
+     turns: dict[int, list[CallRecord]] = {}
+     for call in calls:
+@@ -177,6 +187,8 @@ def evaluate(task: Task, tr: Transcript, root: Path, fixture_dir: Path, default_
+         tool_type = "wrong_tool"
+     elif reqs and _assign(reqs, valid, ordered) is None:
+         tool_type = "wrong_tool"
++    elif exp.get("after_last_edit") and not _after_last_edit_ok(exp["after_last_edit"], calls):
++        tool_type = "no_confirm_run"
+     elif exp.get("parallel") and not _parallel_ok(reqs, valid):
+         tool_type = "not_parallel"
+     tool_ok = tool_type == ""
+diff --git a/src/toolcallbench/cli.py b/src/toolcallbench/cli.py
+index c4d26a5..dc7d702 100644
+--- a/src/toolcallbench/cli.py
++++ b/src/toolcallbench/cli.py
+@@ -1,8 +1,9 @@
+-"""Command-line interface: init, list-tasks, validate-tasks, doctor, run, report, sessions."""
++"""Command-line interface: init, list-tasks, validate-tasks, doctor, run, report, sessions, compare, export."""
+ from __future__ import annotations
+ 
+ import argparse
+ import hashlib
++import os
+ import platform
+ import re
+ import shutil
+@@ -13,13 +14,15 @@ from typing import Any
+ 
+ from . import __version__
+ from .backends import BACKEND_KINDS, PROFILES, BackendError, OllamaBackend, OpenAICompatBackend, ScriptedBackend, make_backend
+-from .config import ConfigError, ModelSpec, RunConfig, data_dir, find_project_root, load_config
++from .compare import render_compare
++from .config import DEFAULT_API_KEY_ENV, ConfigError, ModelSpec, RunConfig, data_dir, find_project_root, load_config
++from .export import FORMATS, export_session
+ from .models import Task
+ from .report import markdown_to_html, render_markdown
+ from .runner import SYSTEM_PROMPT, run_once
+ from .store import Store, new_session_id, write_log
+-from .tasks import TaskError, load_tasks, select_tasks
+-from .tools import run_trusted
++from .tasks import TaskError, load_tasks, select_tasks, tasks_fingerprint
++from .tools import TOOLS_OFFERED_MODES, run_trusted
+ 
+ DEFAULT_HOSTS = {"ollama": "http://localhost:11434", "openai-compat": "http://localhost:8080", "scripted": ""}
+ 
+@@ -61,6 +64,12 @@ def build_config(args: argparse.Namespace) -> RunConfig:
+         cfg.declared_flash_attention = True
+     if args.profile:
+         cfg.profile = args.profile
++    if args.tools_offered:
++        cfg.tools_offered = args.tools_offered
++    if args.max_calls_per_turn is not None:
++        cfg.max_calls_per_turn = args.max_calls_per_turn
++    if args.api_key_env:
++        cfg.api_key_env = args.api_key_env
+     if args.model:
+         cfg.models = [ModelSpec(name=m) for m in args.model]
+     if args.think != "default":
+@@ -73,9 +82,25 @@ def build_config(args: argparse.Namespace) -> RunConfig:
+         raise ConfigError("no models given: use --model NAME (repeatable) or --config FILE")
+     if cfg.repeats < 1 or cfg.max_calls < 1 or cfg.max_turns < 1:
+         raise ConfigError("repeats, max_calls and max_turns must be at least 1")
++    if cfg.max_calls_per_turn < 0:
++        raise ConfigError("max_calls_per_turn must be 0 or more")
++    cfg.api_key_env, cfg.api_key = resolve_api_key(cfg.backend, cfg.api_key_env)
+     return cfg
+ 
+ 
++def resolve_api_key(backend: str, env_name: str) -> tuple[str, str]:
++    """Read the API key from an environment variable. The key itself is never accepted on the command line or in YAML."""
++    if backend != "openai-compat":
++        if env_name:
++            raise ConfigError("an API key is only used with --backend openai-compat")
++        return "", ""
++    name = env_name or DEFAULT_API_KEY_ENV
++    key = os.environ.get(name, "")
++    if env_name and not key:
++        raise ConfigError(f"environment variable {env_name} is not set (it should hold your API key)")
++    return (name if key else ""), key
++
++
+ def _session_settings(cfg: RunConfig, tasks: list[Task]) -> dict[str, Any]:
+     return {
+         "backend": cfg.backend,
+@@ -89,6 +114,10 @@ def _session_settings(cfg: RunConfig, tasks: list[Task]) -> dict[str, Any]:
+         "declared_kv_cache_type": cfg.declared_kv_cache_type,
+         "declared_flash_attention": cfg.declared_flash_attention,
+         "think": {m.name: m.think for m in cfg.models},
++        "tools_offered": cfg.tools_offered,
++        "max_calls_per_turn": cfg.max_calls_per_turn,
++        "api_key_env": cfg.api_key_env or "none",
++        "tasks_sha": tasks_fingerprint(tasks),
+         "system_prompt_sha": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()[:12],
+         "toolcallbench_version": __version__,
+         "python": platform.python_version(),
+@@ -115,14 +144,16 @@ def cmd_list_tasks(args: argparse.Namespace) -> int:
+     _, tasks_dir, _, _ = _paths(args)
+     tasks = load_tasks(tasks_dir)
+     if args.markdown:
+-        print("| Task | Group | Title | Tool named in prompt | Reference calls |")
+-        print("| --- | --- | --- | --- | --- |")
++        print("| Task | Group | Title | Tool named in prompt | Reference calls | In default run |")
++        print("| --- | --- | --- | --- | --- | --- |")
+         for t in tasks:
+-            print(f"| {t.id} | {t.group} | {t.title} | {'yes' if t.tools_named else 'no'} | {t.baseline_calls} |")
++            print(f"| {t.id} | {t.group} | {t.title} | {'yes' if t.tools_named else 'no'} | {t.baseline_calls} | {'no (optional)' if t.optional else 'yes'} |")
+     else:
+         for t in tasks:
+-            print(f"{t.id:<12} {t.group:<8} calls={t.baseline_calls}  {t.title}")
+-        print(f"\n{len(tasks)} tasks")
++            mark = "  [optional]" if t.optional else ""
++            print(f"{t.id:<12} {t.group:<8} calls={t.baseline_calls}  {t.title}{mark}")
++        core = sum(1 for t in tasks if not t.optional)
++        print(f"\n{len(tasks)} tasks ({core} in a default run, {len(tasks) - core} optional: select them with --groups or --tasks)")
+     return 0
+ 
+ 
+@@ -149,7 +180,7 @@ def cmd_init(args: argparse.Namespace) -> int:
+ 
+ def cmd_validate_tasks(args: argparse.Namespace) -> int:
+     _, tasks_dir, fixture, _ = _paths(args)
+-    tasks = select_tasks(load_tasks(tasks_dir), _split(args.tasks), _split(args.groups))
++    tasks = select_tasks(load_tasks(tasks_dir), _split(args.tasks), _split(args.groups), include_optional=True)
+     backend = ScriptedBackend(tasks, "oracle")
+     failed = 0
+     for task in tasks:
+@@ -223,11 +254,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
+                 _line(True, f"model {name}", f"{info.get('parameter_size', '?')} {info.get('quant', '?')}; {note}")
+                 probe_backends.append(backend)
+         else:
+-            OpenAICompatBackend("probe", base_url=host, timeout=10).check()
+-            all_ok &= _line(True, "OpenAI-compatible server", f"reachable at {host}")
++            key_name, key = resolve_api_key("openai-compat", args.api_key_env or cfg.api_key_env)
++            OpenAICompatBackend("probe", base_url=host, timeout=10, api_key=key).check()
++            all_ok &= _line(True, "OpenAI-compatible server", f"reachable at {host}" + (f" (API key from {key_name})" if key else ""))
+             if args.probe:
+                 for name in args.model or []:
+-                    probe_backends.append(OpenAICompatBackend(name, base_url=host, timeout=120))
++                    probe_backends.append(OpenAICompatBackend(name, base_url=host, timeout=120, api_key=key))
+     except BackendError as exc:
+         all_ok &= _line(False, "model server", f"{exc}" + ("; start it with: ollama serve" if kind == "ollama" else ""))
+     if args.probe and probe_backends and tasks:
+@@ -273,6 +305,7 @@ def cmd_run(args: argparse.Namespace) -> int:
+             timeout=cfg.request_timeout,
+             tasks=tasks,
+             profile=cfg.profile,
++            api_key=cfg.api_key,
+         )
+         try:
+             backend.check()
+@@ -295,7 +328,15 @@ def cmd_run(args: argparse.Namespace) -> int:
+                     continue
+                 if hasattr(backend, "options"):
+                     backend.options = cfg.options_for(repeat)
+-                record = run_once(task, backend, fixture, max_calls=cfg.max_calls, max_turns=cfg.max_turns)
++                record = run_once(
++                    task,
++                    backend,
++                    fixture,
++                    max_calls=cfg.max_calls,
++                    max_turns=cfg.max_turns,
++                    tools_offered=cfg.tools_offered,
++                    max_calls_per_turn=cfg.max_calls_per_turn,
++                )
+                 log_path = write_log(results_dir, session_id, spec.name, repeat, record)
+                 store.add_run(session_id, model=spec.name, quant=quant, backend=cfg.backend, repeat=repeat, record=record, log_path=log_path)
+                 if record.status == "error":
+@@ -353,6 +394,71 @@ def cmd_sessions(args: argparse.Namespace) -> int:
+     return 0
+ 
+ 
++def _open_store(args: argparse.Namespace) -> tuple[Store | None, Path]:
++    _, _, _, results_dir = _paths(args)
++    db = results_dir / "results.sqlite"
++    if not db.exists():
++        print(f"no results database at {db}; run a benchmark first", file=sys.stderr)
++        return None, results_dir
++    return Store(db), results_dir
++
++
++def _resolve_session(store: Store, name: str | None, offset: int = 0) -> str | None:
++    """'latest' is the newest session, 'previous' the one before it; anything else is a session id."""
++    sessions = [s["session_id"] for s in store.list_sessions()]
++    if name in (None, "latest"):
++        return sessions[offset] if len(sessions) > offset else None
++    if name == "previous":
++        return sessions[1] if len(sessions) > 1 else None
++    return name if store.session_exists(name) else None
++
++
++def cmd_compare(args: argparse.Namespace) -> int:
++    store, results_dir = _open_store(args)
++    if store is None:
++        return 1
++    id_b = _resolve_session(store, args.second or "latest")
++    id_a = _resolve_session(store, args.first or "previous")
++    if id_a is None or id_b is None:
++        print("need two sessions to compare; see: toolcallbench sessions", file=sys.stderr)
++        store.close()
++        return 1
++    if id_a == id_b:
++        print("both names point at the same session", file=sys.stderr)
++        store.close()
++        return 1
++    markdown = render_compare(store, id_a, id_b)
++    out_dir = results_dir / "reports"
++    out_dir.mkdir(parents=True, exist_ok=True)
++    path = out_dir / f"compare-{id_a}-vs-{id_b}.md"
++    path.write_text(markdown, encoding="utf-8")
++    print(markdown)
++    print(f"saved: {path}")
++    store.close()
++    return 0
++
++
++def cmd_export(args: argparse.Namespace) -> int:
++    store, results_dir = _open_store(args)
++    if store is None:
++        return 1
++    session_id = _resolve_session(store, args.session)
++    if session_id is None:
++        print(f"no such session: {args.session}", file=sys.stderr)
++        store.close()
++        return 1
++    text = export_session(store, session_id, args.format)
++    if args.output == "-":
++        sys.stdout.write(text)
++    else:
++        path = Path(args.output) if args.output else results_dir / "exports" / f"{session_id}.{args.format}"
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(text, encoding="utf-8")
++        print(f"exported {session_id} to {path}")
++    store.close()
++    return 0
++
++
+ # ------------------------------------------------------------------------ parser
+ 
+ 
+@@ -386,6 +492,7 @@ def build_parser() -> argparse.ArgumentParser:
+     p.add_argument("--host")
+     p.add_argument("--model", action="append", help="model to check (repeatable)")
+     p.add_argument("--config", help="YAML config file; the probe then uses its settings (num_ctx, temperature, think, timeout)")
++    p.add_argument("--api-key-env", dest="api_key_env", help="NAME of the environment variable holding an API key (openai-compat backend only)")
+     p.add_argument("--probe", action="store_true", help="run one real task against each model")
+     p.set_defaults(func=cmd_doctor)
+ 
+@@ -401,6 +508,9 @@ def build_parser() -> argparse.ArgumentParser:
+     p.add_argument("--repeats", type=int)
+     p.add_argument("--max-calls", type=int, dest="max_calls")
+     p.add_argument("--max-turns", type=int, dest="max_turns")
++    p.add_argument("--tools-offered", choices=TOOLS_OFFERED_MODES, dest="tools_offered", help="all (default): every tool; task: only the tools the task's reference solution uses (an ablation)")
++    p.add_argument("--max-calls-per-turn", type=int, dest="max_calls_per_turn", help="run only this many calls from each model reply (default 0: run all of them)")
++    p.add_argument("--api-key-env", dest="api_key_env", help="NAME of the environment variable holding an API key (openai-compat backend only). The key itself is never taken as an argument")
+     p.add_argument("--kv-cache-type", dest="kv_cache_type", help="KV cache type your server was started with (recorded only)")
+     p.add_argument("--flash-attention", action="store_true", help="record that the server runs with flash attention")
+     p.add_argument("--profile", choices=PROFILES, help="behaviour of the scripted backend")
+@@ -417,6 +527,17 @@ def build_parser() -> argparse.ArgumentParser:
+ 
+     p = sub.add_parser("sessions", parents=[common], help="list stored sessions")
+     p.set_defaults(func=cmd_sessions)
++
++    p = sub.add_parser("compare", parents=[common], help="compare two sessions: pass rates, changed tasks, failure families")
++    p.add_argument("first", nargs="?", help="session id, or 'previous' (default)")
++    p.add_argument("second", nargs="?", help="session id, or 'latest' (default)")
++    p.set_defaults(func=cmd_compare)
++
++    p = sub.add_parser("export", parents=[common], help="write a session's runs as JSON or CSV")
++    p.add_argument("--session", help="session id or 'latest' (default)")
++    p.add_argument("--format", choices=FORMATS, default="json")
++    p.add_argument("--output", help="file to write; '-' prints to the terminal (default: results/exports/<session>.<format>)")
++    p.set_defaults(func=cmd_export)
+     return parser
+ 
+ 
+diff --git a/src/toolcallbench/compare.py b/src/toolcallbench/compare.py
+new file mode 100644
+index 0000000..289033b
+--- /dev/null
++++ b/src/toolcallbench/compare.py
+@@ -0,0 +1,125 @@
++"""Compare two sessions: what changed between two runs of the benchmark."""
++from __future__ import annotations
++
++from typing import Any
++
++from .report import FAILURE_FAMILIES, _fmt, _pct, _table, aggregate
++from .stats import format_range, ranges_overlap
++from .store import Store
++
++# Settings that change how a model behaves or how runs are scored. A difference here may explain a difference in results.
++COMPARED_SETTINGS = [
++    ("backend", "Backend"),
++    ("backend_version", "Backend version"),
++    ("host", "Host"),
++    ("num_ctx", "Context length"),
++    ("temperature", "Temperature"),
++    ("seed", "Base seed"),
++    ("repeats", "Repeats"),
++    ("max_calls", "Call limit"),
++    ("max_turns", "Turn limit"),
++    ("tools_offered", "Tools offered"),
++    ("max_calls_per_turn", "Calls run per reply"),
++    ("declared_kv_cache_type", "KV cache type"),
++    ("declared_flash_attention", "Flash attention"),
++    ("think", "Thinking mode"),
++    ("system_prompt_sha", "System prompt hash"),
++    ("tasks_sha", "Task set hash"),
++    ("toolcallbench_version", "ToolCallBench version"),
++]
++
++
++def _same(a: Any, b: Any) -> bool:
++    return a == b
++
++
++def settings_differences(a: dict[str, Any], b: dict[str, Any]) -> list[tuple[str, Any, Any]]:
++    rows = []
++    for key, label in COMPARED_SETTINGS:
++        left, right = a.get(key, "-"), b.get(key, "-")
++        if not _same(left, right):
++            rows.append((label, left, right))
++    return rows
++
++
++def _verdict(first: dict[str, Any], second: dict[str, Any]) -> str:
++    if not first["scored"] or not second["scored"]:
++        return "-"
++    if ranges_overlap(first["range"], second["range"]):
++        return "no clear difference"
++    return "better in B" if first["range"][1] < second["range"][0] else "worse in B"
++
++
++def _family_counts(model: dict[str, Any]) -> dict[str, int]:
++    return {family: sum(model["failures"].get(t, 0) for t in types) for family, types in FAILURE_FAMILIES.items()}
++
++
++def render_compare(store: Store, id_a: str, id_b: str) -> str:
++    runs_a, runs_b = store.runs(id_a), store.runs(id_b)
++    set_a, set_b = store.session(id_a)["settings"], store.session(id_b)["settings"]
++    models_a = {m["model"]: m for m in aggregate(runs_a)["models"]}
++    models_b = {m["model"]: m for m in aggregate(runs_b)["models"]}
++    both = [name for name in models_a if name in models_b]
++
++    out = [f"# ToolCallBench comparison: {id_a} (A) vs {id_b} (B)", ""]
++
++    out += ["## Are the two runs comparable?", ""]
++    differences = settings_differences(set_a, set_b)
++    if differences:
++        out += ["These settings differ, so a change in results may come from them and not from the model:", ""]
++        out += _table(["Setting", "A", "B"], [[label, str(x), str(y)] for label, x, y in differences])
++    else:
++        out.append("The settings, task set and versions are identical.")
++    if set_a.get("tasks_sha") and set_b.get("tasks_sha") and set_a["tasks_sha"] != set_b["tasks_sha"]:
++        out += ["", "**The task sets differ.** Compare only the tasks both runs share, and treat overall pass rates with care."]
++
++    out += ["", "## Pass rate by model", ""]
++    if both:
++        rows = []
++        for name in both:
++            a, b = models_a[name], models_b[name]
++            change = "-"
++            if a["scored"] and b["scored"]:
++                change = f"{100 * (b['passed'] / b['scored'] - a['passed'] / a['scored']):+.1f} pts"
++            rows.append(
++                [
++                    name,
++                    f"{_pct(a['passed'], a['scored'])} ({format_range(a['passed'], a['scored'])})",
++                    f"{_pct(b['passed'], b['scored'])} ({format_range(b['passed'], b['scored'])})",
++                    change,
++                    _verdict(a, b),
++                    f"{_fmt(a['seconds'])} / {_fmt(b['seconds'])}",
++                ]
++            )
++        out += _table(["Model", "Pass A (95% range)", "Pass B (95% range)", "Change", "Verdict", "s/task A / B"], rows)
++        out += ["", "'No clear difference' means the 95% ranges overlap: the change could be noise."]
++    else:
++        out.append("The two sessions have no model in common.")
++    only_a = [n for n in models_a if n not in models_b]
++    only_b = [n for n in models_b if n not in models_a]
++    if only_a:
++        out += ["", f"Only in A: {', '.join(only_a)}"]
++    if only_b:
++        out += ["", f"Only in B: {', '.join(only_b)}"]
++
++    out += ["", "## Tasks that changed", ""]
++    rows = []
++    for name in both:
++        for task_id in sorted(set(models_a[name]["tasks"]) & set(models_b[name]["tasks"])):
++            pa, ta = models_a[name]["tasks"][task_id]
++            pb, tb = models_b[name]["tasks"][task_id]
++            if ta and tb and pa / ta != pb / tb:
++                arrow = "improved" if pb / tb > pa / ta else "got worse"
++                rows.append([name, task_id, f"{pa}/{ta}", f"{pb}/{tb}", arrow])
++    out += _table(["Model", "Task", "A", "B", "Change"], rows) if rows else ["No task changed."]
++
++    out += ["", "## Why runs failed: change by family", ""]
++    rows = []
++    for name in both:
++        fa, fb = _family_counts(models_a[name]), _family_counts(models_b[name])
++        for family in FAILURE_FAMILIES:
++            if fa[family] != fb[family]:
++                rows.append([name, family, str(fa[family]), str(fb[family])])
++    out += _table(["Model", "Failure family", "A", "B"], rows) if rows else ["No change in failure families."]
++    out.append("")
++    return "\n".join(out)
+diff --git a/src/toolcallbench/config.py b/src/toolcallbench/config.py
+index 56eea41..4fd744d 100644
+--- a/src/toolcallbench/config.py
++++ b/src/toolcallbench/config.py
+@@ -7,8 +7,19 @@ from typing import Any
+ 
+ import yaml
+ 
+-SETTINGS_KEYS = {"num_ctx", "temperature", "seed", "repeats", "max_calls", "max_turns", "request_timeout"}
+-TOP_KEYS = {"backend", "host", "settings", "declared_server", "models"}
++SETTINGS_KEYS = {
++    "num_ctx",
++    "temperature",
++    "seed",
++    "repeats",
++    "max_calls",
++    "max_turns",
++    "request_timeout",
++    "max_calls_per_turn",
++    "tools_offered",
++}
++TOP_KEYS = {"backend", "host", "api_key_env", "settings", "declared_server", "models"}
++DEFAULT_API_KEY_ENV = "TOOLCALLBENCH_API_KEY"
+ 
+ 
+ class ConfigError(ValueError):
+@@ -33,6 +44,10 @@ class RunConfig:
+     max_calls: int = 12
+     max_turns: int = 10
+     request_timeout: float = 300.0
++    max_calls_per_turn: int = 0  # 0 = run every call the model makes in one reply
++    tools_offered: str = "all"  # "all" or "task" (only the tools the reference solution uses)
++    api_key_env: str = ""  # name of the environment variable that holds the API key (never the key itself)
++    api_key: str = field(default="", repr=False)  # read from that variable at run time; never saved
+     declared_kv_cache_type: str = "f16"
+     declared_flash_attention: bool = False
+     profile: str = "oracle"  # only used by the scripted backend
+@@ -69,12 +84,19 @@ def load_config(path: Path) -> RunConfig:
+     cfg = RunConfig()
+     cfg.backend = data.get("backend", cfg.backend)
+     cfg.host = data.get("host", cfg.host)
++    cfg.api_key_env = data.get("api_key_env", cfg.api_key_env)
++    if not isinstance(cfg.api_key_env, str) or (cfg.api_key_env and not cfg.api_key_env.replace("_", "").isalnum()):
++        raise ConfigError(f"{path}: api_key_env must be the NAME of an environment variable, not the key itself")
+     settings = data.get("settings") or {}
+     bad = set(settings) - SETTINGS_KEYS
+     if bad:
+         raise ConfigError(f"{path}: unknown settings {sorted(bad)}; allowed: {sorted(SETTINGS_KEYS)}")
+     for key, value in settings.items():
+         setattr(cfg, key, value)
++    if cfg.tools_offered not in ("all", "task"):
++        raise ConfigError(f"{path}: tools_offered must be 'all' or 'task'")
++    if not isinstance(cfg.max_calls_per_turn, int) or cfg.max_calls_per_turn < 0:
++        raise ConfigError(f"{path}: max_calls_per_turn must be 0 or a positive whole number")
+     declared = data.get("declared_server") or {}
+     cfg.declared_kv_cache_type = str(declared.get("kv_cache_type", cfg.declared_kv_cache_type))
+     cfg.declared_flash_attention = bool(declared.get("flash_attention", cfg.declared_flash_attention))
+diff --git a/src/toolcallbench/data/tasks/chain-04.yaml b/src/toolcallbench/data/tasks/chain-04.yaml
+index 64d0cdf..c3fb7a5 100644
+--- a/src/toolcallbench/data/tasks/chain-04.yaml
++++ b/src/toolcallbench/data/tasks/chain-04.yaml
+@@ -1,6 +1,7 @@
+ id: chain-04
+ group: chain
+ title: Fix both failing tests
++version: 2  # 2: the suite must be run again after the last edit (earlier results are not comparable)
+ prompt: |
+   Two tests in this repository fail. Fix the code so that the whole test suite passes,
+   and run the suite at the end to confirm.
+@@ -13,6 +14,9 @@ expect:
+     - tool: run_command
+       args: {command: {contains: pytest}}
+   min_calls: 3
++  after_last_edit:
++    - tool: run_command
++      args: {command: {contains: pytest}}
+   max_calls: 10
+   command:
+     - argv: [python, -m, pytest, -q]
+diff --git a/src/toolcallbench/data/tasks/nested-01.yaml b/src/toolcallbench/data/tasks/nested-01.yaml
+new file mode 100644
+index 0000000..8748efd
+--- /dev/null
++++ b/src/toolcallbench/data/tasks/nested-01.yaml
+@@ -0,0 +1,38 @@
++id: nested-01
++group: nested
++title: Fix both bugs with one apply_edits call
++tools_named: true
++optional: true
++extra_tools: [apply_edits]
++prompt: |
++  Two tests in this repository fail. Use the apply_edits tool, once, to fix both bugs
++  (they are in different files), then run the test suite to confirm that everything passes.
++expect:
++  calls:
++    - tool: apply_edits
++    - tool: run_command
++      args: {command: {contains: pytest}}
++  forbidden_tools: [edit_file, apply_patch]
++  max_calls: 10
++  after_last_edit:
++    - tool: run_command
++      args: {command: {contains: pytest}}
++  command:
++    - argv: [python, -m, pytest, -q]
++reference:
++  - calls:
++      - {tool: read_file, args: {path: src/shelf/catalog.py}}
++      - {tool: read_file, args: {path: src/shelf/fees.py}}
++  - calls:
++      - tool: apply_edits
++        args:
++          edits:
++            - path: src/shelf/catalog.py
++              old_text: "    return [b for b in books if query in b.title]"
++              new_text: "    needle = query.lower()\n    return [b for b in books if needle in b.title.lower()]"
++            - path: src/shelf/fees.py
++              old_text: "    return round(days * per_day, 2)"
++              new_text: "    fee = round(days * per_day, 2)\n    if cap is not None:\n        fee = min(fee, cap)\n    return fee"
++  - calls:
++      - {tool: run_command, args: {command: "python -m pytest -q"}}
++  - final: Fixed the title search and the late-fee cap with one apply_edits call; all tests pass.
+diff --git a/src/toolcallbench/data/tasks/nested-02.yaml b/src/toolcallbench/data/tasks/nested-02.yaml
+new file mode 100644
+index 0000000..3ac5369
+--- /dev/null
++++ b/src/toolcallbench/data/tasks/nested-02.yaml
+@@ -0,0 +1,32 @@
++id: nested-02
++group: nested
++title: Change two settings with one set_json_values call
++tools_named: true
++optional: true
++extra_tools: [set_json_values]
++prompt: |
++  Use the set_json_values tool, once, to change loan_days to 21 and max_loans_per_member to 5
++  in config/settings.json.
++expect:
++  calls:
++    - tool: set_json_values
++      args: {path: config/settings.json}
++  forbidden_tools: [edit_file, apply_patch]
++  max_calls: 4
++  final_files:
++    config/settings.json:
++      contains: ['"loan_days": 21', '"max_loans_per_member": 5']
++      not_contains: ['"loan_days": 14', '"max_loans_per_member": 3']
++  command:
++    - argv: [python, -c, "import json; d = json.load(open('config/settings.json')); assert d['loan_days'] == 21 and d['max_loans_per_member'] == 5 and d['late_fee_per_day'] == 0.25"]
++reference:
++  - calls:
++      - {tool: read_file, args: {path: config/settings.json}}
++  - calls:
++      - tool: set_json_values
++        args:
++          path: config/settings.json
++          updates:
++            - {key_path: [loan_days], value: 21}
++            - {key_path: [max_loans_per_member], value: 5}
++  - final: Set loan_days to 21 and max_loans_per_member to 5.
+diff --git a/src/toolcallbench/data/tasks/nested-03.yaml b/src/toolcallbench/data/tasks/nested-03.yaml
+new file mode 100644
+index 0000000..92b8fa4
+--- /dev/null
++++ b/src/toolcallbench/data/tasks/nested-03.yaml
+@@ -0,0 +1,28 @@
++id: nested-03
++group: nested
++title: Change JSON settings, no tool named
++optional: true
++extra_tools: [apply_edits, set_json_values]
++prompt: |
++  In config/settings.json, change currency to EUR and max_late_fee to 15.0. Leave every other setting as it is.
++expect:
++  calls:
++    - tool: [set_json_values, apply_edits, edit_file, apply_patch]
++  max_calls: 5
++  final_files:
++    config/settings.json:
++      contains: ['"currency": "EUR"', '"max_late_fee": 15.0']
++      not_contains: ['"currency": "USD"', '"max_late_fee": 10.0']
++  command:
++    - argv: [python, -c, "import json; d = json.load(open('config/settings.json')); assert d['currency'] == 'EUR' and d['max_late_fee'] == 15.0 and d['loan_days'] == 14 and d['late_fee_per_day'] == 0.25"]
++reference:
++  - calls:
++      - {tool: read_file, args: {path: config/settings.json}}
++  - calls:
++      - tool: set_json_values
++        args:
++          path: config/settings.json
++          updates:
++            - {key_path: [currency], value: EUR}
++            - {key_path: [max_late_fee], value: 15.0}
++  - final: Changed currency to EUR and max_late_fee to 15.0.
+diff --git a/src/toolcallbench/data/tasks/nested-04.yaml b/src/toolcallbench/data/tasks/nested-04.yaml
+new file mode 100644
+index 0000000..87c1d37
+--- /dev/null
++++ b/src/toolcallbench/data/tasks/nested-04.yaml
+@@ -0,0 +1,47 @@
++id: nested-04
++group: nested
++title: Add a function and its test in one apply_edits call
++tools_named: true
++optional: true
++extra_tools: [apply_edits]
++prompt: |
++  Use the apply_edits tool, once, to do two things. Add a function shout(text) at the end of src/shelf/utils.py;
++  it returns the text in upper case followed by an exclamation mark, so shout('hi') returns 'HI!'.
++  Then, in tests/test_utils.py, import shout and add a test named test_shout that checks it.
++  Run tests/test_utils.py at the end to confirm that it passes.
++expect:
++  calls:
++    - tool: apply_edits
++    - tool: run_command
++      args: {command: {contains: pytest}}
++  forbidden_tools: [edit_file, apply_patch]
++  max_calls: 8
++  after_last_edit:
++    - tool: run_command
++      args: {command: {contains: pytest}}
++  final_files:
++    tests/test_utils.py:
++      contains: ["def test_shout", "shout"]
++  command:
++    - argv: [python, -m, pytest, -q, tests/test_utils.py]
++    - argv: [python, -c, "import sys; sys.path.insert(0, 'src'); from shelf.utils import shout; assert shout('hi') == 'HI!'"]
++reference:
++  - calls:
++      - {tool: read_file, args: {path: src/shelf/utils.py}}
++      - {tool: read_file, args: {path: tests/test_utils.py}}
++  - calls:
++      - tool: apply_edits
++        args:
++          edits:
++            - path: src/shelf/utils.py
++              old_text: "    return len(isbn) == 13 and isbn.isdigit()"
++              new_text: "    return len(isbn) == 13 and isbn.isdigit()\n\n\ndef shout(text: str) -> str:\n    return text.upper() + \"!\""
++            - path: tests/test_utils.py
++              old_text: "from shelf.utils import format_money, isbn_ok, slugify"
++              new_text: "from shelf.utils import format_money, isbn_ok, shout, slugify"
++            - path: tests/test_utils.py
++              old_text: "    assert not isbn_ok(\"12345\")"
++              new_text: "    assert not isbn_ok(\"12345\")\n\n\ndef test_shout():\n    assert shout(\"hi\") == \"HI!\""
++  - calls:
++      - {tool: run_command, args: {command: "python -m pytest -q tests/test_utils.py"}}
++  - final: Added shout() and test_shout with one apply_edits call; the tests pass.
+diff --git a/src/toolcallbench/export.py b/src/toolcallbench/export.py
+new file mode 100644
+index 0000000..691b911
+--- /dev/null
++++ b/src/toolcallbench/export.py
+@@ -0,0 +1,57 @@
++"""Export a session's runs as JSON or CSV so results can be shared or analysed elsewhere."""
++from __future__ import annotations
++
++import csv
++import io
++import json
++from typing import Any
++
++from .store import Store
++
++RUN_COLUMNS = [
++    "session_id",
++    "model",
++    "quant",
++    "backend",
++    "task_id",
++    "grp",
++    "repeat",
++    "status",
++    "passed",
++    "failure_type",
++    "calls_made",
++    "turns",
++    "efficiency",
++    "eval_tokens",
++    "eval_seconds",
++    "prompt_tokens",
++    "prompt_seconds",
++    "load_seconds",
++    "wall_seconds",
++    "tok_per_s",
++    "error",
++    "created_at",
++]
++
++FORMATS = ("json", "csv")
++
++
++def export_session(store: Store, session_id: str, fmt: str) -> str:
++    if fmt not in FORMATS:
++        raise ValueError(f"unknown format '{fmt}'; choose from {', '.join(FORMATS)}")
++    session = store.session(session_id)
++    rows: list[dict[str, Any]] = [{key: run.get(key) for key in RUN_COLUMNS} for run in store.runs(session_id)]
++    if fmt == "json":
++        payload = {
++            "session_id": session_id,
++            "started_at": session["started_at"],
++            "finished_at": session["finished_at"],
++            "settings": session["settings"],
++            "runs": rows,
++        }
++        return json.dumps(payload, indent=2) + "\n"
++    buffer = io.StringIO()
++    writer = csv.DictWriter(buffer, fieldnames=RUN_COLUMNS, lineterminator="\n")
++    writer.writeheader()
++    writer.writerows(rows)
++    return buffer.getvalue()
+diff --git a/src/toolcallbench/models.py b/src/toolcallbench/models.py
+index 630d4c7..b11d747 100644
+--- a/src/toolcallbench/models.py
++++ b/src/toolcallbench/models.py
+@@ -4,7 +4,7 @@ from __future__ import annotations
+ from dataclasses import dataclass, field
+ from typing import Any
+ 
+-GROUPS = ("read", "edit", "run", "chain", "failure")
++GROUPS = ("read", "edit", "run", "chain", "failure", "nested")
+ 
+ 
+ @dataclass
+@@ -16,6 +16,9 @@ class Task:
+     expect: dict[str, Any]
+     reference: list[dict[str, Any]]
+     tools_named: bool = False
++    optional: bool = False  # left out of a default run; used when selected with --tasks or --groups
++    extra_tools: list[str] = field(default_factory=list)  # tools offered in addition to the six core ones
++    version: int = 1  # raised when a task changes in a way that makes old results not comparable
+ 
+     @property
+     def baseline_calls(self) -> int:
+diff --git a/src/toolcallbench/report.py b/src/toolcallbench/report.py
+index 6b1161d..04b1588 100644
+--- a/src/toolcallbench/report.py
++++ b/src/toolcallbench/report.py
+@@ -8,11 +8,12 @@ from typing import Any
+ 
+ from .checks import FAILURE_TYPES
+ from .models import GROUPS
++from .stats import format_range, ranges_overlap, wilson_interval
+ from .store import Store
+ 
+ # Groups of failure types, by what to fix. Every type in checks.FAILURE_TYPES belongs to exactly one group.
+ FAILURE_FAMILIES = {
+-    "Wrong tool": ["unknown_tool", "wrong_tool", "too_few_calls", "unneeded_call", "not_parallel"],
++    "Wrong tool or step": ["unknown_tool", "wrong_tool", "too_few_calls", "no_confirm_run", "unneeded_call", "not_parallel"],
+     "Bad arguments": ["invalid_json", "invalid_args", "wrong_args"],
+     "No real call": ["no_call", "text_tool_call"],
+     "Over budget": ["call_limit"],
+@@ -27,11 +28,14 @@ SETTING_LABELS = [
+     ("temperature", "Temperature"),
+     ("seed", "Base seed (+1 per repeat)"),
+     ("repeats", "Repeats per task"),
++    ("tools_offered", "Tools offered"),
++    ("max_calls_per_turn", "Calls run per reply (0 = all)"),
+     ("max_calls", "Call limit per run"),
+     ("max_turns", "Turn limit per run"),
+     ("declared_kv_cache_type", "KV cache type (declared)"),
+     ("declared_flash_attention", "Flash attention (declared)"),
+     ("system_prompt_sha", "System prompt hash"),
++    ("tasks_sha", "Task set hash"),
+     ("toolcallbench_version", "ToolCallBench version"),
+     ("platform", "Platform"),
+     ("python", "Python"),
+@@ -72,6 +76,7 @@ def aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
+                 "errors": len(rows) - len(scored),
+                 "passed": passed,
+                 "scored": len(scored),
++                "range": wilson_interval(passed, len(scored)),
+                 "groups": groups,
+                 "failures": failures,
+                 "tasks": tasks,
+@@ -98,6 +103,39 @@ def _fmt(value: float | None, digits: int = 1) -> str:
+     return "-" if value is None else f"{value:.{digits}f}"
+ 
+ 
++def _noise_notes(models: list[dict[str, Any]], repeats: Any) -> list[str]:
++    """Plain-language notes on how far the pass rates can be trusted."""
++    ranked = [m for m in models if m["scored"]]
++    ranked.sort(key=lambda m: -m["passed"] / m["scored"])
++    lines = [
++        "",
++        "The 95% range is how much a pass rate could move if the same test were run again. "
++        "Models whose ranges overlap cannot be told apart from this run.",
++    ]
++    for i, first in enumerate(ranked):
++        for second in ranked[i + 1 :]:
++            if ranges_overlap(first["range"], second["range"]):
++                lines.append(f"- {first['model']} and {second['model']}: no clear difference (ranges overlap).")
++    if isinstance(repeats, int) and repeats < 3:
++        lines.append(f"- Only {repeats} repeat(s) per task. Use --repeats 3 or more for steadier numbers.")
++    return lines
++
++
++def _consistency(models: list[dict[str, Any]]) -> list[str]:
++    """With repeats: for each model, how many tasks always passed, always failed, or flipped between repeats."""
++    if not any(total > 1 for m in models for _, total in m["tasks"].values()):
++        return []
++    rows = []
++    for m in models:
++        always = sum(1 for p, t in m["tasks"].values() if t and p == t)
++        never = sum(1 for p, t in m["tasks"].values() if t and p == 0)
++        mixed = sum(1 for p, t in m["tasks"].values() if t and 0 < p < t)
++        rows.append([m["model"], str(always), str(mixed), str(never)])
++    return ["", "## Run-to-run consistency", "", "Tasks per model by what happened across repeats. A high 'sometimes' count means the result is noisy.", ""] + _table(
++        ["Model", "Always passed", "Sometimes", "Never passed"], rows
++    )
++
++
+ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[str, str]] | None = None) -> str:
+     session = store.session(session_id)
+     settings = session["settings"]
+@@ -123,15 +161,17 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
+     out += _table(["Setting", "Value"], rows)
+ 
+     out += ["", "## Summary", "", "Pass rate counts only runs where the backend answered. Errors are runs where it did not.", ""]
+-    header = ["Model", "Quant", "Runs", "Errors", "Pass"] + [g.title() for g in GROUPS] + ["tok/s", "s/task", "Calls vs ref"]
++    shown = [g for g in GROUPS if any(r["grp"] == g for r in runs)]
++    header = ["Model", "Quant", "Runs", "Errors", "Pass", "95% range"] + [g.title() for g in shown] + ["tok/s", "s/task", "Calls vs ref"]
+     rows = []
+     for m in sorted(models, key=lambda x: -(x["passed"] / x["scored"] if x["scored"] else -1)):
+         rows.append(
+-            [m["model"], m["quant"] or "-", str(m["runs"]), str(m["errors"]), _pct(m["passed"], m["scored"])]
+-            + [_pct(*m["groups"][g]) for g in GROUPS]
++            [m["model"], m["quant"] or "-", str(m["runs"]), str(m["errors"]), _pct(m["passed"], m["scored"]), format_range(m["passed"], m["scored"])]
++            + [_pct(*m["groups"][g]) for g in shown]
+             + [_fmt(m["tok_per_s"]), _fmt(m["seconds"]), _fmt(m["efficiency"], 2)]
+         )
+     out += _table(header, rows)
++    out += _noise_notes(models, settings.get("repeats"))
+ 
+     seen_types = [t for t in FAILURE_TYPES if any(t in m["failures"] for m in models)]
+     out += ["", "## Why runs failed", ""]
+@@ -147,6 +187,8 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
+     else:
+         out.append("No failures.")
+ 
++    out += _consistency(models)
++
+     out += ["", "## Where the time went", "", "Medians per task. A dash means the server did not report that number.", ""]
+     rows = []
+     for m in models:
+diff --git a/src/toolcallbench/runner.py b/src/toolcallbench/runner.py
+index 6f48c6c..6cef030 100644
+--- a/src/toolcallbench/runner.py
++++ b/src/toolcallbench/runner.py
+@@ -12,7 +12,7 @@ from pathlib import Path
+ from .backends.base import Backend, BackendError
+ from .checks import evaluate
+ from .models import CallRecord, CheckResult, RawToolCall, Task, Transcript
+-from .tools import TOOL_NAMES, TOOL_SPECS, ToolExecutor, validate_arguments
++from .tools import ALL_TOOL_NAMES, ToolExecutor, tool_specs_for, validate_arguments
+ 
+ SYSTEM_PROMPT = (
+     "You are a coding assistant working inside a small Python repository. "
+@@ -22,7 +22,7 @@ SYSTEM_PROMPT = (
+ )
+ 
+ # A reply with no tool calls that still looks like a tool call written out as text.
+-TEXT_CALL_RE = re.compile(r'<tool_call>|<function=|"name"\s*:\s*"(?:%s)"' % "|".join(TOOL_NAMES))
++TEXT_CALL_RE = re.compile(r'<tool_call>|<function=|"name"\s*:\s*"(?:%s)"' % "|".join(ALL_TOOL_NAMES))
+ 
+ 
+ @dataclass
+@@ -34,22 +34,37 @@ class RunRecord:
+     check: CheckResult | None
+ 
+ 
+-def _execute(raw: RawToolCall, turn: int, index: int, executor: ToolExecutor) -> CallRecord:
+-    arguments, kind, message = validate_arguments(raw.name, raw.arguments)
++def _execute(raw: RawToolCall, turn: int, index: int, executor: ToolExecutor, allowed: list[str] | None = None) -> CallRecord:
++    arguments, kind, message = validate_arguments(raw.name, raw.arguments, allowed)
+     if kind:
+         return CallRecord(index, turn, raw.name, raw.arguments, False, False, kind, f"error: {message}")
+     ok, text = executor.execute(raw.name, arguments)
+     return CallRecord(index, turn, raw.name, arguments, True, ok, "" if ok else "tool_error", text)
+ 
+ 
+-def converse(task: Task, backend: Backend, executor: ToolExecutor, tr: Transcript, max_calls: int, max_turns: int) -> None:
+-    """Fill `tr` by talking to the backend until it answers, hits a limit, or fails."""
++def converse(
++    task: Task,
++    backend: Backend,
++    executor: ToolExecutor,
++    tr: Transcript,
++    max_calls: int,
++    max_turns: int,
++    tool_specs: list[dict] | None = None,
++    max_calls_per_turn: int = 0,
++) -> None:
++    """Fill `tr` by talking to the backend until it answers, hits a limit, or fails.
++
++    `max_calls_per_turn` above 0 runs only that many calls from each reply; the rest are skipped and the
++    model is told so (an ablation for models that struggle with several calls at once).
++    """
++    specs = tool_specs if tool_specs is not None else tool_specs_for(task)
++    offered = [spec["function"]["name"] for spec in specs]
+     tr.messages = [
+         {"role": "system", "content": SYSTEM_PROMPT},
+         {"role": "user", "content": task.prompt},
+     ]
+     for turn in range(1, max_turns + 1):
+-        response = backend.chat(tr.messages, TOOL_SPECS)
++        response = backend.chat(tr.messages, specs)
+         tr.turns = turn
+         tr.eval_tokens += response.eval_tokens
+         tr.eval_seconds += response.eval_seconds
+@@ -67,11 +82,16 @@ def converse(task: Task, backend: Backend, executor: ToolExecutor, tr: Transcrip
+             tr.final_text = response.content
+             tr.text_tool_call = bool(TEXT_CALL_RE.search(response.content))
+             return
+-        for raw in response.tool_calls:
++        for position, raw in enumerate(response.tool_calls):
++            if max_calls_per_turn and position >= max_calls_per_turn:
++                tr.messages.append(
++                    {"role": "tool", "tool_name": raw.name, "content": f"skipped: only {max_calls_per_turn} call(s) per turn are run"}
++                )
++                continue
+             if len(tr.calls) >= max_calls:
+                 tr.hit_limit = True
+                 return
+-            record = _execute(raw, turn, len(tr.calls) + 1, executor)
++            record = _execute(raw, turn, len(tr.calls) + 1, executor, offered)
+             tr.calls.append(record)
+             tr.messages.append({"role": "tool", "tool_name": raw.name, "content": record.result})
+     tr.hit_limit = True
+@@ -104,7 +124,16 @@ def repo_diff(before: Path, after: Path, limit: int = 20000) -> str:
+     return text if len(text) <= limit else text[:limit] + "\n[diff cut off]\n"
+ 
+ 
+-def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int = 12, max_turns: int = 10) -> RunRecord:
++def run_once(
++    task: Task,
++    backend: Backend,
++    fixture_dir: Path,
++    *,
++    max_calls: int = 12,
++    max_turns: int = 10,
++    tools_offered: str = "all",
++    max_calls_per_turn: int = 0,
++) -> RunRecord:
+     started = time.monotonic()
+     tr = Transcript()
+     with tempfile.TemporaryDirectory(prefix="tcb-") as tmp:
+@@ -112,7 +141,7 @@ def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int
+         shutil.copytree(fixture_dir, root, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc"))
+         executor = ToolExecutor(root)
+         try:
+-            converse(task, backend, executor, tr, max_calls, max_turns)
++            converse(task, backend, executor, tr, max_calls, max_turns, tool_specs_for(task, tools_offered), max_calls_per_turn)
+         except BackendError as exc:
+             tr.wall_seconds = time.monotonic() - started
+             return RunRecord(task, "error", str(exc), tr, None)
+diff --git a/src/toolcallbench/stats.py b/src/toolcallbench/stats.py
+new file mode 100644
+index 0000000..ae06e5c
+--- /dev/null
++++ b/src/toolcallbench/stats.py
+@@ -0,0 +1,30 @@
++"""Small statistics helpers for pass rates."""
++from __future__ import annotations
++
++import math
++
++
++def wilson_interval(passed: int, total: int, z: float = 1.96) -> tuple[float, float]:
++    """Approximate 95% range for a pass rate (Wilson score interval), as fractions between 0 and 1.
++
++    It treats every run as an independent trial, which is only roughly true (the same 20 tasks are
++    used for every model), so read it as a guide to how much a number can move, not as a guarantee.
++    """
++    if total <= 0:
++        return (0.0, 1.0)
++    p = passed / total
++    denominator = 1 + z * z / total
++    centre = (p + z * z / (2 * total)) / denominator
++    margin = z * math.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / denominator
++    return (max(0.0, centre - margin), min(1.0, centre + margin))
++
++
++def ranges_overlap(a: tuple[float, float], b: tuple[float, float]) -> bool:
++    return a[0] <= b[1] and b[0] <= a[1]
++
++
++def format_range(passed: int, total: int) -> str:
++    if total <= 0:
++        return "-"
++    low, high = wilson_interval(passed, total)
++    return f"{100 * low:.0f}-{100 * high:.0f}%"
+diff --git a/src/toolcallbench/tasks.py b/src/toolcallbench/tasks.py
+index 4069eb5..01141ba 100644
+--- a/src/toolcallbench/tasks.py
++++ b/src/toolcallbench/tasks.py
+@@ -1,6 +1,8 @@
+ """Load and validate task files (tasks/*.yaml)."""
+ from __future__ import annotations
+ 
++import hashlib
++import json
+ from pathlib import Path
+ from typing import Any
+ 
+@@ -8,12 +10,14 @@ import jsonschema
+ import yaml
+ 
+ from .models import GROUPS, Task
++from .tools import EXTRA_TOOL_NAMES
+ 
+ EXPECT_KEYS = {
+     "calls",
+     "min_calls",
+     "max_calls",
+     "ordered",
++    "after_last_edit",
+     "parallel",
+     "no_tool_calls",
+     "forbidden_tools",
+@@ -43,6 +47,9 @@ TASK_SCHEMA = {
+         "group": {"enum": list(GROUPS)},
+         "title": {"type": "string", "minLength": 1},
+         "tools_named": {"type": "boolean"},
++        "optional": {"type": "boolean"},
++        "version": {"type": "integer", "minimum": 1},
++        "extra_tools": {"type": "array", "items": {"enum": list(EXTRA_TOOL_NAMES)}, "uniqueItems": True},
+         "prompt": {"type": "string", "minLength": 1},
+         "expect": {"type": "object"},
+         "reference": {
+@@ -93,6 +100,11 @@ def _validate_expect(expect: dict[str, Any], where: str) -> None:
+             jsonschema.validate(req, _CALL)
+         except jsonschema.ValidationError as exc:
+             raise TaskError(f"{where}: bad expect.calls entry: {exc.message}") from exc
++    for req in expect.get("after_last_edit", []):
++        try:
++            jsonschema.validate(req, _CALL)
++        except jsonschema.ValidationError as exc:
++            raise TaskError(f"{where}: bad expect.after_last_edit entry: {exc.message}") from exc
+     for item in expect.get("command", []):
+         if not isinstance(item, dict) or not isinstance(item.get("argv"), list):
+             raise TaskError(f"{where}: each expect.command entry needs an argv list")
+@@ -121,6 +133,9 @@ def load_task_file(path: Path) -> Task:
+         expect=data["expect"],
+         reference=data["reference"],
+         tools_named=bool(data.get("tools_named", False)),
++        optional=bool(data.get("optional", False)),
++        extra_tools=list(data.get("extra_tools", [])),
++        version=int(data.get("version", 1)),
+     )
+ 
+ 
+@@ -138,7 +153,13 @@ def load_tasks(tasks_dir: Path) -> list[Task]:
+     return tasks
+ 
+ 
+-def select_tasks(tasks: list[Task], ids: list[str] | None = None, groups: list[str] | None = None) -> list[Task]:
++def select_tasks(
++    tasks: list[Task],
++    ids: list[str] | None = None,
++    groups: list[str] | None = None,
++    include_optional: bool = False,
++) -> list[Task]:
++    """Pick tasks. Optional tasks are left out of a default run; naming them (ids or groups) brings them in."""
+     selected = tasks
+     if ids:
+         unknown = set(ids) - {t.id for t in tasks}
+@@ -150,6 +171,23 @@ def select_tasks(tasks: list[Task], ids: list[str] | None = None, groups: list[s
+         if unknown:
+             raise TaskError(f"unknown groups: {sorted(unknown)}; choose from {', '.join(GROUPS)}")
+         selected = [t for t in selected if t.group in groups]
++    if not ids and not groups and not include_optional:
++        selected = [t for t in selected if not t.optional]
+     if not selected:
+         raise TaskError("no tasks selected")
+     return selected
++
++
++def tasks_fingerprint(tasks: list[Task]) -> str:
++    """A short hash of everything that decides how a task is run and scored. Used to warn when two sessions differ."""
++    payload = [
++        {
++            "id": t.id,
++            "version": t.version,
++            "prompt": t.prompt,
++            "expect": t.expect,
++            "extra_tools": t.extra_tools,
++        }
++        for t in sorted(tasks, key=lambda t: t.id)
++    ]
++    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
+diff --git a/src/toolcallbench/tools.py b/src/toolcallbench/tools.py
+index 9dacae7..718a55e 100644
+--- a/src/toolcallbench/tools.py
++++ b/src/toolcallbench/tools.py
+@@ -1,4 +1,7 @@
+-"""The six tools offered to the model, their JSON schemas, and a sandboxed executor.
++"""The tools offered to the model, their JSON schemas, and a sandboxed executor.
++
++Six core tools are offered on every task. Two extra tools take nested arguments (a list of objects);
++they are offered only to tasks that ask for them, so the core results stay comparable.
+ 
+ The executor works inside one directory (a fresh copy of the fixture repo). It is
+ a safety net against accidents, not a security boundary: see docs/SECURITY.md.
+@@ -94,14 +97,94 @@ TOOL_SPECS: list[dict[str, Any]] = [
+     ),
+ ]
+ 
+-TOOL_NAMES = [spec["function"]["name"] for spec in TOOL_SPECS]
+-_VALIDATORS = {spec["function"]["name"]: Draft202012Validator(spec["function"]["parameters"]) for spec in TOOL_SPECS}
+-
++# Extra tools with nested arguments (an array of objects). Offered only to tasks that list them in `extra_tools`.
++EXTRA_TOOL_SPECS: list[dict[str, Any]] = [
++    _spec(
++        "apply_edits",
++        "Make several exact-text replacements, possibly in different files, in one call. Each edit needs path, "
++        "old_text and new_text; old_text must match its file exactly once. Either every edit is applied or none is.",
++        {
++            "edits": {
++                "type": "array",
++                "minItems": 1,
++                "description": "The replacements to make, in order",
++                "items": {
++                    "type": "object",
++                    "properties": {
++                        "path": {"type": "string", "description": "File path relative to the repository root"},
++                        "old_text": {"type": "string", "description": "Exact text to replace; must occur exactly once"},
++                        "new_text": {"type": "string", "description": "Replacement text"},
++                    },
++                    "required": ["path", "old_text", "new_text"],
++                    "additionalProperties": False,
++                },
++            }
++        },
++        ["edits"],
++    ),
++    _spec(
++        "set_json_values",
++        "Set values in a JSON file. Each update gives key_path (the keys from the top of the file down to the value, "
++        "as a list of strings) and the new value. The keys must already exist.",
++        {
++            "path": {"type": "string", "description": "JSON file path relative to the repository root"},
++            "updates": {
++                "type": "array",
++                "minItems": 1,
++                "description": "The values to set",
++                "items": {
++                    "type": "object",
++                    "properties": {
++                        "key_path": {"type": "array", "minItems": 1, "items": {"type": "string"}},
++                        "value": {"type": ["string", "number", "boolean", "null"]},
++                    },
++                    "required": ["key_path", "value"],
++                    "additionalProperties": False,
++                },
++            },
++        },
++        ["path", "updates"],
++    ),
++]
+ 
+-def validate_arguments(name: str, arguments: Any) -> tuple[dict[str, Any] | None, str, str]:
+-    """Check a raw tool call. Returns (arguments, error_kind, message); error_kind is "" when valid."""
+-    if name not in _VALIDATORS:
+-        return None, "unknown_tool", f"unknown tool '{name}'; available tools: {', '.join(TOOL_NAMES)}"
++TOOL_NAMES = [spec["function"]["name"] for spec in TOOL_SPECS]  # the six core tools
++EXTRA_TOOL_NAMES = [spec["function"]["name"] for spec in EXTRA_TOOL_SPECS]
++ALL_TOOL_NAMES = TOOL_NAMES + EXTRA_TOOL_NAMES
++EDIT_TOOL_NAMES = {"edit_file", "apply_patch", "apply_edits", "set_json_values"}
++_VALIDATORS = {
++    spec["function"]["name"]: Draft202012Validator(spec["function"]["parameters"]) for spec in TOOL_SPECS + EXTRA_TOOL_SPECS
++}
++TOOLS_OFFERED_MODES = ("all", "task")
++
++
++def tool_specs_for(task: Any, mode: str = "all") -> list[dict[str, Any]]:
++    """The tools to offer for one task.
++
++    "all": the six core tools plus the task's extra tools (the default).
++    "task": only the tools the task's reference solution uses. This is an ablation that shows how much
++    of the difficulty is choosing a tool; it gives the model a hint.
++    """
++    if mode not in TOOLS_OFFERED_MODES:
++        raise ValueError(f"unknown tools-offered mode '{mode}'; choose from {', '.join(TOOLS_OFFERED_MODES)}")
++    by_name = {spec["function"]["name"]: spec for spec in TOOL_SPECS + EXTRA_TOOL_SPECS}
++    if mode == "task":
++        used = {c["tool"] for step in task.reference for c in step.get("calls", [])}
++        names = [n for n in ALL_TOOL_NAMES if n in used]
++        if not names:  # a task that needs no tool still gets the core tools, so a wrong call can be seen
++            names = list(TOOL_NAMES)
++    else:
++        names = TOOL_NAMES + [n for n in task.extra_tools if n in by_name]
++    return [by_name[n] for n in names]
++
++
++def validate_arguments(name: str, arguments: Any, allowed: list[str] | None = None) -> tuple[dict[str, Any] | None, str, str]:
++    """Check a raw tool call. Returns (arguments, error_kind, message); error_kind is "" when valid.
++
++    `allowed` lists the tools offered to the model for this task (default: the six core tools).
++    """
++    offered = TOOL_NAMES if allowed is None else allowed
++    if name not in _VALIDATORS or name not in offered:
++        return None, "unknown_tool", f"unknown tool '{name}'; available tools: {', '.join(offered)}"
+     if isinstance(arguments, str):
+         try:
+             arguments = json.loads(arguments)
+@@ -152,6 +235,8 @@ class ToolExecutor:
+             "edit_file": self._edit_file,
+             "apply_patch": self._apply_patch,
+             "run_command": self._run_command,
++            "apply_edits": self._apply_edits,
++            "set_json_values": self._set_json_values,
+         }
+ 
+     # ------------------------------------------------------------------ public
+@@ -264,6 +349,52 @@ class ToolExecutor:
+         target.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
+         return f"edited {path}"
+ 
++    def _apply_edits(self, edits: list[dict[str, str]]) -> str:
++        """All edits are checked first and written only if every one of them is valid."""
++        texts: dict[Path, str] = {}
++        for number, edit in enumerate(edits, 1):
++            target = self._resolve(edit["path"])
++            if not target.is_file():
++                raise ToolError(f"edit {number}: file not found: {edit['path']}")
++            if edit["old_text"] == "":
++                raise ToolError(f"edit {number}: old_text must not be empty")
++            text = texts.get(target)
++            if text is None:
++                text = target.read_text(encoding="utf-8")
++            count = text.count(edit["old_text"])
++            if count == 0:
++                raise ToolError(
++                    f"edit {number}: old_text was not found in {edit['path']}. It must match exactly, including "
++                    "whitespace. Nothing was changed."
++                )
++            if count > 1:
++                raise ToolError(f"edit {number}: old_text matches {count} places in {edit['path']}. Nothing was changed.")
++            texts[target] = text.replace(edit["old_text"], edit["new_text"], 1)
++        for target, text in texts.items():
++            target.write_text(text, encoding="utf-8")
++        return f"applied {len(edits)} edit(s) to {len(texts)} file(s)"
++
++    def _set_json_values(self, path: str, updates: list[dict[str, Any]]) -> str:
++        target = self._resolve(path)
++        if not target.is_file():
++            raise ToolError(f"file not found: {path}")
++        try:
++            data = json.loads(target.read_text(encoding="utf-8"))
++        except json.JSONDecodeError as exc:
++            raise ToolError(f"{path} is not valid JSON: {exc.msg}") from exc
++        for number, update in enumerate(updates, 1):
++            keys = update["key_path"]
++            node: Any = data
++            for key in keys[:-1]:
++                if not isinstance(node, dict) or key not in node:
++                    raise ToolError(f"update {number}: key path {'.'.join(keys)} not found. Nothing was changed.")
++                node = node[key]
++            if not isinstance(node, dict) or keys[-1] not in node:
++                raise ToolError(f"update {number}: key path {'.'.join(keys)} not found. Nothing was changed.")
++            node[keys[-1]] = update["value"]
++        target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
++        return f"set {len(updates)} value(s) in {path}"
++
+     def _apply_patch(self, patch: str) -> str:
+         return "\n".join(apply_unified_diff(patch, self._resolve_for_patch))
+ 
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 199de68..435c9e7 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -10,12 +10,19 @@ TASKS_DIR = DATA / "tasks"
+ 
+ 
+ @pytest.fixture(scope="session")
+-def tasks():
++def all_tasks():
++    """Every task, including the optional ones."""
+     from toolcallbench.tasks import load_tasks
+ 
+     return load_tasks(TASKS_DIR)
+ 
+ 
++@pytest.fixture(scope="session")
++def tasks(all_tasks):
++    """The core tasks that a default run uses."""
++    return [t for t in all_tasks if not t.optional]
++
++
+ @pytest.fixture
+ def fixture_dir():
+     return FIXTURE
+diff --git a/tests/mock_servers.py b/tests/mock_servers.py
+index baf33b7..fe660a7 100644
+--- a/tests/mock_servers.py
++++ b/tests/mock_servers.py
+@@ -27,6 +27,7 @@ def _make_handler(kind: str, tasks, profile: str, installed: list[str]):
+             self.wfile.write(body)
+ 
+         def do_GET(self):
++            Handler.requests.append({"path": self.path, "payload": None, "auth": self.headers.get("Authorization", "")})
+             if kind == "ollama" and self.path == "/api/version":
+                 self._send({"version": "0.99.0"})
+             elif kind == "ollama" and self.path == "/api/tags":
+@@ -39,7 +40,7 @@ def _make_handler(kind: str, tasks, profile: str, installed: list[str]):
+         def do_POST(self):
+             length = int(self.headers.get("Content-Length", 0))
+             payload = json.loads(self.rfile.read(length) or b"{}")
+-            Handler.requests.append({"path": self.path, "payload": payload})
++            Handler.requests.append({"path": self.path, "payload": payload, "auth": self.headers.get("Authorization", "")})
+             if kind == "ollama" and self.path == "/api/show":
+                 self._send({"details": {"quantization_level": "Q4_K_M", "parameter_size": "8.2B", "family": "qwen3"},
+                             "capabilities": ["completion", "tools"]})
+diff --git a/tests/test_checks.py b/tests/test_checks.py
+index a989f26..a20ec10 100644
+--- a/tests/test_checks.py
++++ b/tests/test_checks.py
+@@ -96,4 +96,4 @@ def test_path_variants_are_accepted(tasks, fixture_dir):
+ 
+ 
+ def test_failure_types_are_all_documented():
+-    assert len(FAILURE_TYPES) == len(set(FAILURE_TYPES)) == 13
++    assert len(FAILURE_TYPES) == len(set(FAILURE_TYPES)) == 14
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 2aa080b..8bc895e 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -15,14 +15,14 @@ def cli(*args):
+ def test_list_tasks(capsys):
+     assert cli("list-tasks") == 0
+     out = capsys.readouterr().out
+-    assert "read-01" in out and "20 tasks" in out
++    assert "read-01" in out and "24 tasks (20 in a default run, 4 optional" in out
+     assert cli("list-tasks", "--markdown") == 0
+     assert "| Task |" in capsys.readouterr().out
+ 
+ 
+ def test_validate_tasks(capsys):
+     assert cli("validate-tasks") == 0
+-    assert "20/20 reference solutions pass" in capsys.readouterr().out
++    assert "24/24 reference solutions pass" in capsys.readouterr().out
+ 
+ 
+ def test_scripted_run_report_and_resume(tmp_path, capsys):
+@@ -137,4 +137,4 @@ def test_init_with_tasks_gives_a_folder_that_runs(tmp_path, capsys, monkeypatch)
+     assert (tmp_path / "fixtures" / "repo" / "pytest.ini").is_file()
+     monkeypatch.chdir(tmp_path)
+     assert cli("validate-tasks") == 0
+-    assert "20/20 reference solutions pass" in capsys.readouterr().out
++    assert "24/24 reference solutions pass" in capsys.readouterr().out
+diff --git a/tests/test_features.py b/tests/test_features.py
+new file mode 100644
+index 0000000..c9b9613
+--- /dev/null
++++ b/tests/test_features.py
+@@ -0,0 +1,409 @@
++"""Tests for v1.1.0: confidence ranges, compare, export, nested tools, tool options, API key."""
++import csv
++import io
++import json
++import sqlite3
++
++import pytest
++
++from mock_servers import mock_server
++from toolcallbench.backends import OpenAICompatBackend
++from toolcallbench.backends.scripted import ScriptedBackend
++from toolcallbench.checks import evaluate
++from toolcallbench.cli import main as cli_main
++from toolcallbench.compare import render_compare, settings_differences
++from toolcallbench.config import ConfigError, load_config
++from toolcallbench.export import export_session
++from toolcallbench.models import CallRecord, Transcript
++from toolcallbench.report import render_markdown
++from toolcallbench.runner import run_once
++from toolcallbench.stats import format_range, ranges_overlap, wilson_interval
++from toolcallbench.store import Store, write_log
++from toolcallbench.tasks import select_tasks, tasks_fingerprint
++from toolcallbench.tools import ToolExecutor, tool_specs_for, validate_arguments
++
++
++def cli(*argv):
++    return cli_main(list(argv))
++
++
++def fill(store, sid, tasks, fixture_dir, model, profile, settings=None, repeats=1, tmp=None):
++    store.create_session(sid, settings or {"repeats": repeats, "backend": "scripted"})
++    backend = ScriptedBackend(tasks, profile)
++    for task in tasks:
++        for repeat in range(1, repeats + 1):
++            record = run_once(task, backend, fixture_dir)
++            log = write_log(tmp, sid, model, repeat, record)
++            store.add_run(sid, model=model, quant="", backend="scripted", repeat=repeat, record=record, log_path=log)
++
++
++# ------------------------------------------------------------------ confidence range
++
++
++def test_wilson_interval_known_values():
++    low, high = wilson_interval(19, 20)
++    assert 0.74 < low < 0.78 and 0.97 < high < 1.0
++    assert wilson_interval(0, 0) == (0.0, 1.0)
++    low, high = wilson_interval(0, 20)
++    assert low == 0.0 and 0.1 < high < 0.2
++
++
++def test_more_runs_give_a_narrower_range():
++    narrow = wilson_interval(150, 200)
++    wide = wilson_interval(15, 20)
++    assert narrow[1] - narrow[0] < wide[1] - wide[0]
++
++
++def test_overlap_and_format():
++    assert ranges_overlap((0.5, 0.8), (0.7, 0.9)) and not ranges_overlap((0.1, 0.3), (0.6, 0.9))
++    assert format_range(15, 20).endswith("%") and format_range(0, 0) == "-"
++
++
++def test_report_shows_range_and_notes_overlaps(tmp_path, tasks, fixture_dir):
++    store = Store(tmp_path / "r.sqlite")
++    fill(store, "s1", tasks, fixture_dir, "good", "oracle", tmp=tmp_path)
++    # a second model in the same session whose score is close to the first
++    backend = ScriptedBackend(tasks, "bad_edit")
++    for task in tasks:
++        record = run_once(task, backend, fixture_dir)
++        store.add_run("s1", model="close", quant="", backend="scripted", repeat=1, record=record, log_path=write_log(tmp_path, "s1", "close", 1, record))
++    md = render_markdown(store, "s1", {t.id: (t.group, t.title) for t in tasks})
++    assert "95% range" in md and "Only 1 repeat" in md  # repeats below 3 are flagged
++
++
++def test_overlapping_ranges_are_called_out():
++    from toolcallbench.report import _noise_notes
++
++    a = {"model": "a", "scored": 20, "passed": 17, "range": wilson_interval(17, 20)}
++    b = {"model": "b", "scored": 20, "passed": 15, "range": wilson_interval(15, 20)}
++    c = {"model": "c", "scored": 20, "passed": 2, "range": wilson_interval(2, 20)}
++    notes = "\n".join(_noise_notes([a, b, c], 5))
++    assert "a and b: no clear difference" in notes
++    assert "c: no clear" not in notes and "and c" not in notes
++    assert "Only" not in notes
++
++
++def test_consistency_table_appears_only_with_repeats(tmp_path, tasks, fixture_dir):
++    store = Store(tmp_path / "r.sqlite")
++    fill(store, "one", tasks, fixture_dir, "m", "oracle", tmp=tmp_path)
++    assert "Run-to-run consistency" not in render_markdown(store, "one")
++    fill(store, "two", tasks, fixture_dir, "m", "oracle", repeats=2, tmp=tmp_path, settings={"repeats": 2})
++    assert "Run-to-run consistency" in render_markdown(store, "two")
++
++
++def test_report_hides_groups_that_were_not_run(tmp_path, tasks, fixture_dir):
++    store = Store(tmp_path / "r.sqlite")
++    fill(store, "s1", tasks, fixture_dir, "m", "oracle", tmp=tmp_path)
++    header = next(line for line in render_markdown(store, "s1").splitlines() if line.startswith("| Model | Quant"))
++    assert "Nested" not in header and "Chain" in header
++
++
++# ------------------------------------------------------------------ compare / export
++
++
++def test_compare_flags_differences_and_verdicts(tmp_path, tasks, fixture_dir):
++    store = Store(tmp_path / "r.sqlite")
++    fill(store, "a", tasks, fixture_dir, "m", "no_call", settings={"repeats": 1, "num_ctx": 4096, "tasks_sha": "aaa"}, tmp=tmp_path)
++    fill(store, "b", tasks, fixture_dir, "m", "oracle", settings={"repeats": 1, "num_ctx": 8192, "tasks_sha": "bbb"}, tmp=tmp_path)
++    md = render_compare(store, "a", "b")
++    assert "better in B" in md and "Context length" in md and "task sets differ" in md
++    assert "improved" in md and "Failure family" in md
++
++
++def test_compare_identical_settings_and_same_model_noise(tmp_path, tasks, fixture_dir):
++    store = Store(tmp_path / "r.sqlite")
++    fill(store, "a", tasks, fixture_dir, "m", "oracle", tmp=tmp_path)
++    fill(store, "b", tasks, fixture_dir, "m", "oracle", tmp=tmp_path)
++    md = render_compare(store, "a", "b")
++    assert "identical" in md and "no clear difference" in md and "No task changed" in md
++
++
++def test_settings_differences_ignores_equal_values():
++    assert settings_differences({"num_ctx": 1}, {"num_ctx": 1}) == []
++    assert settings_differences({"num_ctx": 1}, {"num_ctx": 2}) == [("Context length", 1, 2)]
++
++
++def test_export_json_and_csv(tmp_path, tasks, fixture_dir):
++    store = Store(tmp_path / "r.sqlite")
++    fill(store, "s1", tasks, fixture_dir, "m", "oracle", tmp=tmp_path)
++    data = json.loads(export_session(store, "s1", "json"))
++    assert data["session_id"] == "s1" and len(data["runs"]) == 20 and data["runs"][0]["model"] == "m"
++    rows = list(csv.DictReader(io.StringIO(export_session(store, "s1", "csv"))))
++    assert len(rows) == 20 and {"task_id", "passed", "failure_type", "prompt_tokens"} <= set(rows[0])
++    with pytest.raises(ValueError):
++        export_session(store, "s1", "xml")
++
++
++def test_cli_compare_and_export(tmp_path, capsys):
++    res = str(tmp_path / "res")
++    assert cli("run", "--backend", "scripted", "--repeats", "1", "--tasks", "read-01,read-02", "--results-dir", res, "--session", "one") == 0
++    assert cli("run", "--backend", "scripted", "--profile", "no_call", "--repeats", "1", "--tasks", "read-01,read-02", "--results-dir", res, "--session", "two") == 0
++    capsys.readouterr()
++    assert cli("compare", "--results-dir", res) == 0  # previous vs latest
++    out = capsys.readouterr().out
++    assert "one (A) vs two (B)" in out and (tmp_path / "res" / "reports" / "compare-one-vs-two.md").exists()
++    assert cli("compare", "one", "one", "--results-dir", res) == 1
++    assert cli("export", "--format", "csv", "--results-dir", res) == 0
++    assert (tmp_path / "res" / "exports" / "two.csv").exists()
++    assert cli("export", "--session", "one", "--output", "-", "--results-dir", res) == 0
++    assert '"session_id": "one"' in capsys.readouterr().out
++    assert cli("export", "--session", "nope", "--results-dir", res) == 1
++
++
++def test_compare_needs_two_sessions(tmp_path, capsys):
++    res = str(tmp_path / "res")
++    cli("run", "--backend", "scripted", "--repeats", "1", "--tasks", "read-01", "--results-dir", res)
++    assert cli("compare", "--results-dir", res) == 1
++    assert "need two sessions" in capsys.readouterr().err
++
++
++# ------------------------------------------------------------------ task sets
++
++
++def test_optional_tasks_need_to_be_named(all_tasks):
++    default = select_tasks(all_tasks)
++    assert len(default) == 20 and not any(t.optional for t in default)
++    assert [t.id for t in select_tasks(all_tasks, groups=["nested"])] == ["nested-01", "nested-02", "nested-03", "nested-04"]
++    assert [t.id for t in select_tasks(all_tasks, ids=["nested-02"])] == ["nested-02"]
++    assert len(select_tasks(all_tasks, include_optional=True)) == 24
++
++
++def test_task_fingerprint_changes_when_a_task_changes(all_tasks):
++    before = tasks_fingerprint(all_tasks)
++    assert before == tasks_fingerprint(list(reversed(all_tasks)))  # order does not matter
++    chain4 = next(t for t in all_tasks if t.id == "chain-04")
++    chain4.expect["max_calls"] = 99
++    try:
++        assert tasks_fingerprint(all_tasks) != before
++    finally:
++        chain4.expect.pop("max_calls", None)
++        chain4.expect["max_calls"] = 10
++
++
++def test_chain_04_is_version_2(all_tasks):
++    assert next(t for t in all_tasks if t.id == "chain-04").version == 2
++
++
++# ------------------------------------------------------------------ nested tools
++
++
++def test_apply_edits_is_all_or_nothing(repo):
++    executor = ToolExecutor(repo)
++    before = (repo / "src/shelf/fees.py").read_text()
++    ok, text = executor.execute(
++        "apply_edits",
++        {
++            "edits": [
++                {"path": "src/shelf/fees.py", "old_text": "return 0.0", "new_text": "return 1.0"},
++                {"path": "src/shelf/catalog.py", "old_text": "THIS IS NOT THERE", "new_text": "x"},
++            ]
++        },
++    )
++    assert not ok and "edit 2" in text and "Nothing was changed" in text
++    assert (repo / "src/shelf/fees.py").read_text() == before
++
++
++def test_apply_edits_chains_edits_in_the_same_file(repo):
++    executor = ToolExecutor(repo)
++    ok, text = executor.execute(
++        "apply_edits",
++        {
++            "edits": [
++                {"path": "src/shelf/fees.py", "old_text": "return 0.0", "new_text": "return 1.0"},
++                {"path": "src/shelf/fees.py", "old_text": "return 1.0", "new_text": "return 2.0"},
++            ]
++        },
++    )
++    assert ok and "return 2.0" in (repo / "src/shelf/fees.py").read_text()
++
++
++def test_set_json_values_sets_and_refuses_unknown_keys(repo):
++    executor = ToolExecutor(repo)
++    ok, _ = executor.execute("set_json_values", {"path": "config/settings.json", "updates": [{"key_path": ["loan_days"], "value": 30}]})
++    assert ok and json.loads((repo / "config/settings.json").read_text())["loan_days"] == 30
++    before = (repo / "config/settings.json").read_text()
++    ok, text = executor.execute("set_json_values", {"path": "config/settings.json", "updates": [{"key_path": ["no", "such"], "value": 1}]})
++    assert not ok and "not found" in text and (repo / "config/settings.json").read_text() == before
++
++
++@pytest.mark.parametrize(
++    "arguments,kind",
++    [
++        ({"edits": "not a list"}, "invalid_args"),
++        ({"edits": []}, "invalid_args"),
++        ({"edits": [{"path": "a.py", "old_text": "x"}]}, "invalid_args"),  # new_text missing
++        ({"edits": [{"path": "a.py", "old_text": "x", "new_text": "y", "extra": 1}]}, "invalid_args"),
++        ('{"edits": [', "invalid_json"),
++    ],
++)
++def test_nested_arguments_are_validated(arguments, kind):
++    assert validate_arguments("apply_edits", arguments, ["apply_edits"])[1] == kind
++
++
++def test_a_tool_that_was_not_offered_is_unknown(all_tasks):
++    good = {"edits": [{"path": "a.py", "old_text": "x", "new_text": "y"}]}
++    assert validate_arguments("apply_edits", good)[1] == "unknown_tool"  # default: core tools only
++    assert validate_arguments("apply_edits", good, ["apply_edits"])[1] == ""
++
++
++def test_nested_tasks_pass_with_the_oracle_and_fail_with_bad_edits(all_tasks, fixture_dir):
++    nested = [t for t in all_tasks if t.group == "nested"]
++    for profile, should_pass in (("oracle", True), ("bad_edit", False), ("no_call", False)):
++        backend = ScriptedBackend(nested, profile)
++        for task in nested:
++            record = run_once(task, backend, fixture_dir)
++            assert record.check.passed is should_pass, (profile, task.id, record.check.details)
++
++
++def test_nested_tools_are_only_offered_to_tasks_that_ask(all_tasks):
++    names = lambda task, mode="all": [s["function"]["name"] for s in tool_specs_for(task, mode)]  # noqa: E731
++    by_id = {t.id: t for t in all_tasks}
++    assert len(names(by_id["read-01"])) == 6 and "apply_edits" not in names(by_id["chain-04"])
++    assert names(by_id["nested-01"])[-1] == "apply_edits" and len(names(by_id["nested-03"])) == 8
++
++
++# ------------------------------------------------------------------ tool options
++
++
++def test_tools_offered_task_mode_gives_only_the_needed_tools(all_tasks):
++    by_id = {t.id: t for t in all_tasks}
++    names = [s["function"]["name"] for s in tool_specs_for(by_id["read-01"], "task")]
++    assert names == ["read_file"]
++    assert len(tool_specs_for(by_id["failure-01"], "task")) == 6  # no tool needed: keep the core tools so a wrong call shows
++    with pytest.raises(ValueError):
++        tool_specs_for(by_id["read-01"], "some")
++
++
++def test_tools_offered_task_mode_makes_other_tools_unknown(tasks, fixture_dir):
++    task = next(t for t in tasks if t.id == "read-01")
++    record = run_once(task, ScriptedBackend(tasks, "wrong_tool"), fixture_dir, tools_offered="task")
++    assert record.check.failure_type == "unknown_tool"  # list_dir was not offered
++    record = run_once(task, ScriptedBackend(tasks, "oracle"), fixture_dir, tools_offered="task")
++    assert record.check.passed
++
++
++def test_one_call_per_turn_skips_the_rest(tasks, fixture_dir):
++    task = next(t for t in tasks if t.id == "failure-02")  # asks for two independent reads in one step
++    full = run_once(task, ScriptedBackend(tasks, "oracle"), fixture_dir)
++    assert full.check.passed
++    limited = run_once(task, ScriptedBackend(tasks, "oracle"), fixture_dir, max_calls_per_turn=1)
++    assert not limited.check.passed and len(limited.transcript.calls) < len(full.transcript.calls)
++    assert any("skipped: only 1 call(s) per turn" in str(m.get("content")) for m in limited.transcript.messages)
++
++
++# ------------------------------------------------------------------ tests after the last edit
++
++
++def _transcript(calls, final="Done."):
++    tr = Transcript(final_text=final)
++    tr.calls = [CallRecord(i, 1, tool, args, True, True, "", "") for i, (tool, args) in enumerate(calls, 1)]
++    return tr
++
++
++def test_chain_04_needs_a_test_run_after_the_last_edit(all_tasks, fixture_dir, repo):
++    task = next(t for t in all_tasks if t.id == "chain-04")
++    edit = lambda p: ("edit_file", {"path": p, "old_text": "a", "new_text": "b"})  # noqa: E731
++    run = ("run_command", {"command": "python -m pytest -q"})
++    # a test run before the edits only: calls are right, but nothing confirms the fix
++    tr = _transcript([run, edit("src/shelf/catalog.py"), edit("src/shelf/fees.py")])
++    assert evaluate(task, tr, repo, fixture_dir).failure_type == "no_confirm_run"
++    # a test run after the last edit satisfies the check (the repo is unfixed here, so only the tool check is asserted)
++    tr = _transcript([edit("src/shelf/catalog.py"), edit("src/shelf/fees.py"), run])
++    assert evaluate(task, tr, repo, fixture_dir).tool_ok
++    # a test run between the edits is not enough
++    tr = _transcript([edit("src/shelf/catalog.py"), run, edit("src/shelf/fees.py")])
++    assert evaluate(task, tr, repo, fixture_dir).failure_type == "no_confirm_run"
++
++
++def test_failed_edits_do_not_count_as_the_last_edit(all_tasks, fixture_dir, repo):
++    task = next(t for t in all_tasks if t.id == "chain-04")
++    tr = Transcript(final_text="Done.")
++    tr.calls = [
++        CallRecord(1, 1, "edit_file", {"path": "src/shelf/catalog.py", "old_text": "a", "new_text": "b"}, True, True, "", ""),
++        CallRecord(2, 1, "edit_file", {"path": "src/shelf/fees.py", "old_text": "a", "new_text": "b"}, True, True, "", ""),
++        CallRecord(3, 2, "run_command", {"command": "pytest"}, True, True, "", ""),
++        CallRecord(4, 3, "edit_file", {"path": "src/shelf/fees.py", "old_text": "zz", "new_text": "b"}, True, False, "tool_error", "error"),
++    ]
++    assert evaluate(task, tr, repo, fixture_dir).tool_ok
++
++
++# ------------------------------------------------------------------ API key
++
++
++def test_api_key_is_sent_as_a_bearer_token(tasks, fixture_dir):
++    with mock_server("openai", tasks) as (url, handler):
++        backend = OpenAICompatBackend("mock", base_url=url, api_key="sk-test-123")
++        backend.check()
++        run_once(next(t for t in tasks if t.id == "failure-01"), backend, fixture_dir)
++        assert all(r["auth"] == "Bearer sk-test-123" for r in handler.requests)
++        assert backend.describe()["api_key"] == "set" and "sk-test-123" not in json.dumps(backend.describe())
++
++
++def test_no_key_means_no_authorization_header(tasks):
++    with mock_server("openai", tasks) as (url, handler):
++        OpenAICompatBackend("mock", base_url=url).check()
++        assert handler.requests[-1]["auth"] == ""
++
++
++def test_run_reads_the_key_from_the_named_variable_and_never_saves_it(tmp_path, tasks, monkeypatch):
++    monkeypatch.setenv("MY_BENCH_KEY", "sk-secret-value")
++    res = str(tmp_path / "res")
++    with mock_server("openai", tasks) as (url, handler):
++        code = cli("run", "--backend", "openai-compat", "--host", url, "--model", "mock", "--repeats", "1", "--tasks", "failure-01",
++                   "--api-key-env", "MY_BENCH_KEY", "--results-dir", res, "--session", "k")
++        assert code == 0 and all(r["auth"] == "Bearer sk-secret-value" for r in handler.requests)
++    stored = json.dumps(Store(tmp_path / "res" / "results.sqlite").session("k")["settings"])
++    assert "sk-secret-value" not in stored and "MY_BENCH_KEY" in stored
++    for path in (tmp_path / "res").rglob("*"):
++        if path.is_file():
++            assert b"sk-secret-value" not in path.read_bytes(), path
++
++
++def test_missing_key_variable_is_an_error(tmp_path, capsys, monkeypatch):
++    monkeypatch.delenv("NOT_SET_ANYWHERE", raising=False)
++    code = cli("run", "--backend", "openai-compat", "--model", "m", "--api-key-env", "NOT_SET_ANYWHERE", "--results-dir", str(tmp_path))
++    assert code == 2 and "NOT_SET_ANYWHERE is not set" in capsys.readouterr().err
++
++
++def test_key_with_other_backends_is_an_error(tmp_path, capsys, monkeypatch):
++    monkeypatch.setenv("SOME_KEY", "x")
++    assert cli("run", "--backend", "scripted", "--api-key-env", "SOME_KEY", "--results-dir", str(tmp_path)) == 2
++    assert "only used with --backend openai-compat" in capsys.readouterr().err
++
++
++def test_a_pasted_key_in_the_config_is_refused(tmp_path):
++    path = tmp_path / "c.yaml"
++    path.write_text("backend: openai-compat\napi_key_env: sk-abc123-this-is-a-key\nmodels: [m]\n")
++    with pytest.raises(ConfigError, match="NAME of an environment variable"):
++        load_config(path)
++
++
++# ------------------------------------------------------------------ config keys
++
++
++def test_new_settings_load_and_validate(tmp_path):
++    path = tmp_path / "c.yaml"
++    path.write_text("settings:\n  tools_offered: task\n  max_calls_per_turn: 1\nmodels: [m]\n")
++    cfg = load_config(path)
++    assert cfg.tools_offered == "task" and cfg.max_calls_per_turn == 1
++    path.write_text("settings:\n  tools_offered: some\nmodels: [m]\n")
++    with pytest.raises(ConfigError, match="tools_offered"):
++        load_config(path)
++    path.write_text("settings:\n  max_calls_per_turn: -1\nmodels: [m]\n")
++    with pytest.raises(ConfigError, match="max_calls_per_turn"):
++        load_config(path)
++
++
++def test_session_records_the_new_settings(tmp_path):
++    res = str(tmp_path / "res")
++    assert cli("run", "--backend", "scripted", "--repeats", "1", "--tasks", "read-01", "--tools-offered", "task", "--max-calls-per-turn", "2",
++               "--results-dir", res, "--session", "s") == 0
++    settings = Store(tmp_path / "res" / "results.sqlite").session("s")["settings"]
++    assert settings["tools_offered"] == "task" and settings["max_calls_per_turn"] == 2 and len(settings["tasks_sha"]) == 12
++
++
++def test_cli_runs_the_nested_group(tmp_path):
++    res = str(tmp_path / "res")
++    assert cli("run", "--backend", "scripted", "--repeats", "1", "--groups", "nested", "--results-dir", res, "--session", "n") == 0
++    db = sqlite3.connect(tmp_path / "res" / "results.sqlite")
++    assert db.execute("select count(*), sum(passed) from runs").fetchone() == (4, 4)
+diff --git a/tests/test_tasks.py b/tests/test_tasks.py
+index ae351c1..a918223 100644
+--- a/tests/test_tasks.py
++++ b/tests/test_tasks.py
+@@ -7,19 +7,25 @@ from toolcallbench.backends.scripted import ScriptedBackend
+ from toolcallbench.tasks import TaskError, load_task_file, load_tasks, select_tasks
+ 
+ 
+-def test_twenty_tasks_across_five_groups(tasks):
++def test_twenty_core_tasks_across_five_groups(tasks):
+     assert len(tasks) == 20
+-    assert {t.group for t in tasks} == set(GROUPS)
++    assert {t.group for t in tasks} == set(GROUPS) - {"nested"}
+     assert len({t.id for t in tasks}) == 20
+ 
+ 
++def test_four_optional_nested_tasks(all_tasks):
++    optional = [t for t in all_tasks if t.optional]
++    assert [t.id for t in optional] == ["nested-01", "nested-02", "nested-03", "nested-04"]
++    assert all(t.group == "nested" and t.extra_tools for t in optional)
++
++
+ def test_twelve_name_their_tools(tasks):
+     assert sum(t.tools_named for t in tasks) == 12
+ 
+ 
+-def test_every_reference_solution_passes(tasks, fixture_dir):
+-    backend = ScriptedBackend(tasks, "oracle")
+-    for task in tasks:
++def test_every_reference_solution_passes(all_tasks, fixture_dir):
++    backend = ScriptedBackend(all_tasks, "oracle")
++    for task in all_tasks:
+         record = run_once(task, backend, fixture_dir)
+         assert record.status == "ok" and record.check.passed, (task.id, record.check.details)
+         assert record.check.efficiency == 1.0

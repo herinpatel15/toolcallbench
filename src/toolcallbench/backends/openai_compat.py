@@ -51,17 +51,23 @@ class OpenAICompatBackend(Backend):
         base_url: str = "http://localhost:8080",
         options: dict[str, Any] | None = None,
         timeout: float = 300.0,
+        api_key: str = "",
     ):
         self.model = model
+        self._api_key = api_key  # sent as a bearer token; never written to results or logs
         self.base_url = base_url.rstrip("/")
         self.options = dict(options or {})
         self.timeout = timeout
 
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+
     def check(self) -> None:
-        request_json("GET", f"{self.base_url}/v1/models", None, self.timeout)
+        request_json("GET", f"{self.base_url}/v1/models", None, self.timeout, self._headers)
 
     def describe(self) -> dict[str, Any]:
-        return {"backend": self.name, "host": self.base_url}
+        return {"backend": self.name, "host": self.base_url, "api_key": "set" if self._api_key else "none"}
 
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> BackendResponse:
         payload: dict[str, Any] = {
@@ -74,7 +80,7 @@ class OpenAICompatBackend(Backend):
             if key in self.options:
                 payload[key] = self.options[key]
         started = time.monotonic()
-        data = request_json("POST", f"{self.base_url}/v1/chat/completions", payload, self.timeout)
+        data = request_json("POST", f"{self.base_url}/v1/chat/completions", payload, self.timeout, self._headers)
         elapsed = time.monotonic() - started
         try:
             message = data["choices"][0]["message"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-GROUPS = ("read", "edit", "run", "chain", "failure")
+GROUPS = ("read", "edit", "run", "chain", "failure", "nested")
 
 
 @dataclass
@@ -16,6 +16,9 @@ class Task:
     expect: dict[str, Any]
     reference: list[dict[str, Any]]
     tools_named: bool = False
+    optional: bool = False  # left out of a default run; used when selected with --tasks or --groups
+    extra_tools: list[str] = field(default_factory=list)  # tools offered in addition to the six core ones
+    version: int = 1  # raised when a task changes in a way that makes old results not comparable
 
     @property
     def baseline_calls(self) -> int:

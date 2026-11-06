@@ -12,7 +12,7 @@ from pathlib import Path
 from .backends.base import Backend, BackendError
 from .checks import evaluate
 from .models import CallRecord, CheckResult, RawToolCall, Task, Transcript
-from .tools import TOOL_NAMES, TOOL_SPECS, ToolExecutor, validate_arguments
+from .tools import ALL_TOOL_NAMES, ToolExecutor, tool_specs_for, validate_arguments
 
 SYSTEM_PROMPT = (
     "You are a coding assistant working inside a small Python repository. "
@@ -22,7 +22,7 @@ SYSTEM_PROMPT = (
 )
 
 # A reply with no tool calls that still looks like a tool call written out as text.
-TEXT_CALL_RE = re.compile(r'<tool_call>|<function=|"name"\s*:\s*"(?:%s)"' % "|".join(TOOL_NAMES))
+TEXT_CALL_RE = re.compile(r'<tool_call>|<function=|"name"\s*:\s*"(?:%s)"' % "|".join(ALL_TOOL_NAMES))
 
 
 @dataclass
@@ -34,22 +34,37 @@ class RunRecord:
     check: CheckResult | None
 
 
-def _execute(raw: RawToolCall, turn: int, index: int, executor: ToolExecutor) -> CallRecord:
-    arguments, kind, message = validate_arguments(raw.name, raw.arguments)
+def _execute(raw: RawToolCall, turn: int, index: int, executor: ToolExecutor, allowed: list[str] | None = None) -> CallRecord:
+    arguments, kind, message = validate_arguments(raw.name, raw.arguments, allowed)
     if kind:
         return CallRecord(index, turn, raw.name, raw.arguments, False, False, kind, f"error: {message}")
     ok, text = executor.execute(raw.name, arguments)
     return CallRecord(index, turn, raw.name, arguments, True, ok, "" if ok else "tool_error", text)
 
 
-def converse(task: Task, backend: Backend, executor: ToolExecutor, tr: Transcript, max_calls: int, max_turns: int) -> None:
-    """Fill `tr` by talking to the backend until it answers, hits a limit, or fails."""
+def converse(
+    task: Task,
+    backend: Backend,
+    executor: ToolExecutor,
+    tr: Transcript,
+    max_calls: int,
+    max_turns: int,
+    tool_specs: list[dict] | None = None,
+    max_calls_per_turn: int = 0,
+) -> None:
+    """Fill `tr` by talking to the backend until it answers, hits a limit, or fails.
+
+    `max_calls_per_turn` above 0 runs only that many calls from each reply; the rest are skipped and the
+    model is told so (an ablation for models that struggle with several calls at once).
+    """
+    specs = tool_specs if tool_specs is not None else tool_specs_for(task)
+    offered = [spec["function"]["name"] for spec in specs]
     tr.messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": task.prompt},
     ]
     for turn in range(1, max_turns + 1):
-        response = backend.chat(tr.messages, TOOL_SPECS)
+        response = backend.chat(tr.messages, specs)
         tr.turns = turn
         tr.eval_tokens += response.eval_tokens
         tr.eval_seconds += response.eval_seconds
@@ -67,11 +82,16 @@ def converse(task: Task, backend: Backend, executor: ToolExecutor, tr: Transcrip
             tr.final_text = response.content
             tr.text_tool_call = bool(TEXT_CALL_RE.search(response.content))
             return
-        for raw in response.tool_calls:
+        for position, raw in enumerate(response.tool_calls):
+            if max_calls_per_turn and position >= max_calls_per_turn:
+                tr.messages.append(
+                    {"role": "tool", "tool_name": raw.name, "content": f"skipped: only {max_calls_per_turn} call(s) per turn are run"}
+                )
+                continue
             if len(tr.calls) >= max_calls:
                 tr.hit_limit = True
                 return
-            record = _execute(raw, turn, len(tr.calls) + 1, executor)
+            record = _execute(raw, turn, len(tr.calls) + 1, executor, offered)
             tr.calls.append(record)
             tr.messages.append({"role": "tool", "tool_name": raw.name, "content": record.result})
     tr.hit_limit = True
@@ -104,7 +124,16 @@ def repo_diff(before: Path, after: Path, limit: int = 20000) -> str:
     return text if len(text) <= limit else text[:limit] + "\n[diff cut off]\n"
 
 
-def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int = 12, max_turns: int = 10) -> RunRecord:
+def run_once(
+    task: Task,
+    backend: Backend,
+    fixture_dir: Path,
+    *,
+    max_calls: int = 12,
+    max_turns: int = 10,
+    tools_offered: str = "all",
+    max_calls_per_turn: int = 0,
+) -> RunRecord:
     started = time.monotonic()
     tr = Transcript()
     with tempfile.TemporaryDirectory(prefix="tcb-") as tmp:
@@ -112,7 +141,7 @@ def run_once(task: Task, backend: Backend, fixture_dir: Path, *, max_calls: int 
         shutil.copytree(fixture_dir, root, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc"))
         executor = ToolExecutor(root)
         try:
-            converse(task, backend, executor, tr, max_calls, max_turns)
+            converse(task, backend, executor, tr, max_calls, max_turns, tool_specs_for(task, tools_offered), max_calls_per_turn)
         except BackendError as exc:
             tr.wall_seconds = time.monotonic() - started
             return RunRecord(task, "error", str(exc), tr, None)

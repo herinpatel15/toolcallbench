@@ -7,19 +7,25 @@ from toolcallbench.backends.scripted import ScriptedBackend
 from toolcallbench.tasks import TaskError, load_task_file, load_tasks, select_tasks
 
 
-def test_twenty_tasks_across_five_groups(tasks):
+def test_twenty_core_tasks_across_five_groups(tasks):
     assert len(tasks) == 20
-    assert {t.group for t in tasks} == set(GROUPS)
+    assert {t.group for t in tasks} == set(GROUPS) - {"nested"}
     assert len({t.id for t in tasks}) == 20
+
+
+def test_four_optional_nested_tasks(all_tasks):
+    optional = [t for t in all_tasks if t.optional]
+    assert [t.id for t in optional] == ["nested-01", "nested-02", "nested-03", "nested-04"]
+    assert all(t.group == "nested" and t.extra_tools for t in optional)
 
 
 def test_twelve_name_their_tools(tasks):
     assert sum(t.tools_named for t in tasks) == 12
 
 
-def test_every_reference_solution_passes(tasks, fixture_dir):
-    backend = ScriptedBackend(tasks, "oracle")
-    for task in tasks:
+def test_every_reference_solution_passes(all_tasks, fixture_dir):
+    backend = ScriptedBackend(all_tasks, "oracle")
+    for task in all_tasks:
         record = run_once(task, backend, fixture_dir)
         assert record.status == "ok" and record.check.passed, (task.id, record.check.details)
         assert record.check.efficiency == 1.0

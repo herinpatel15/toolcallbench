@@ -1,6 +1,7 @@
 id: chain-04
 group: chain
 title: Fix both failing tests
+version: 2  # 2: the suite must be run again after the last edit (earlier results are not comparable)
 prompt: |
   Two tests in this repository fail. Fix the code so that the whole test suite passes,
   and run the suite at the end to confirm.
@@ -13,6 +14,9 @@ expect:
     - tool: run_command
       args: {command: {contains: pytest}}
   min_calls: 3
+  after_last_edit:
+    - tool: run_command
+      args: {command: {contains: pytest}}
   max_calls: 10
   command:
     - argv: [python, -m, pytest, -q]

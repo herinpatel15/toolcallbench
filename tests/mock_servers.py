@@ -27,6 +27,7 @@ def _make_handler(kind: str, tasks, profile: str, installed: list[str]):
             self.wfile.write(body)
 
         def do_GET(self):
+            Handler.requests.append({"path": self.path, "payload": None, "auth": self.headers.get("Authorization", "")})
             if kind == "ollama" and self.path == "/api/version":
                 self._send({"version": "0.99.0"})
             elif kind == "ollama" and self.path == "/api/tags":
@@ -39,7 +40,7 @@ def _make_handler(kind: str, tasks, profile: str, installed: list[str]):
         def do_POST(self):
             length = int(self.headers.get("Content-Length", 0))
             payload = json.loads(self.rfile.read(length) or b"{}")
-            Handler.requests.append({"path": self.path, "payload": payload})
+            Handler.requests.append({"path": self.path, "payload": payload, "auth": self.headers.get("Authorization", "")})
             if kind == "ollama" and self.path == "/api/show":
                 self._send({"details": {"quantization_level": "Q4_K_M", "parameter_size": "8.2B", "family": "qwen3"},
                             "capabilities": ["completion", "tools"]})

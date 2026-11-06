@@ -50,7 +50,7 @@ loop that never stops. Each one breaks an agent, and none show up in a general s
 | FR-2 | Support Ollama, OpenAI-compatible servers (llama.cpp, LM Studio, vLLM) and a scripted fake model | Must |
 | FR-3 | Offer six tools with JSON Schema and validate every tool call before running it | Must |
 | FR-4 | Run tools only in a throwaway copy of a sample repository; allow-list commands | Must |
-| FR-5 | Score deterministically; classify every failure into one of 13 types | Must |
+| FR-5 | Score deterministically; classify every failure into one of 14 types | Must |
 | FR-6 | Repeat each task N times with different seeds; record all settings | Must |
 | FR-7 | Store results in SQLite and keep full JSONL transcripts | Must |
 | FR-8 | Resume an interrupted session without repeating finished runs | Must |
@@ -77,7 +77,7 @@ loop that never stops. Each one breaks an agent, and none show up in a general s
 | Metric | Target |
 | --- | --- |
 | Tasks with a passing reference solution | 20 of 20 |
-| Each failure type detectable by a scripted profile | 13 of 13 (see `TEST_PLAN.md`) |
+| Each failure type detectable by a scripted profile | 14 of 14 (see `TEST_PLAN.md`) |
 | A full run of one 8B model, 20 tasks x 3 repeats, on the owner's Mac | measured by the owner; record the time in the report |
 | Owner can reproduce the repo from `BUILD_FROM_SCRATCH.md` | all tests pass |
 

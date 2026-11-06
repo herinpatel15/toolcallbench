@@ -96,4 +96,4 @@ def test_path_variants_are_accepted(tasks, fixture_dir):
 
 
 def test_failure_types_are_all_documented():
-    assert len(FAILURE_TYPES) == len(set(FAILURE_TYPES)) == 13
+    assert len(FAILURE_TYPES) == len(set(FAILURE_TYPES)) == 14

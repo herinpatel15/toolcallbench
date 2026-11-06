@@ -33,11 +33,12 @@ def make_backend(
     timeout: float,
     tasks: list[Task],
     profile: str = "oracle",
+    api_key: str = "",
 ) -> Backend:
     if kind == "ollama":
         return OllamaBackend(model, host=host, options=options, think=think, timeout=timeout)
     if kind == "openai-compat":
-        return OpenAICompatBackend(model, base_url=host, options=options, timeout=timeout)
+        return OpenAICompatBackend(model, base_url=host, options=options, timeout=timeout, api_key=api_key)
     if kind == "scripted":
         return ScriptedBackend(tasks, profile=profile)
     raise ValueError(f"unknown backend '{kind}'; choose from {', '.join(BACKEND_KINDS)}")

@@ -36,7 +36,7 @@ python scripts/verify_build_guide.py   # rebuild from BUILD_FROM_SCRATCH.md and 
 | FR-2 backends | `test_http_backends` (Ollama, OpenAI-compatible), scripted backend used everywhere |
 | FR-3 six tools, validation | `test_tools::test_six_tools_with_object_schemas`, `test_validate_arguments` |
 | FR-4 sandbox | `test_tools::test_read_file_errors`, `test_run_command_allowlist_and_confinement`, `test_output_is_truncated`, `test_patching` |
-| FR-5 scoring, 13 failure types | `test_checks` (profiles and hand-built transcripts), `test_failure_types_are_all_documented` |
+| FR-5 scoring, 14 failure types | `test_checks` (profiles and hand-built transcripts), `test_failure_types_are_all_documented` |
 | FR-6 repeats, settings recorded | `test_config::test_seed_changes_per_repeat`, `test_cli::test_run_against_mock_ollama` (settings JSON) |
 | FR-7 SQLite and JSONL | `test_store_report::test_store_roundtrip_and_resume_keys`, `test_jsonl_log_has_messages_and_summary` |
 | FR-8 resume | `test_cli::test_scripted_run_report_and_resume`, `test_resume_after_partial` |
@@ -62,6 +62,7 @@ python scripts/verify_build_guide.py   # rebuild from BUILD_FROM_SCRATCH.md and 
 | Calls a tool when none is needed | `wrong_tool` on `failure-01` | `unneeded_call` |
 | Edit that does not apply | `bad_edit` | `patch_failed` |
 | Parallel calls sent one per turn | hand-built transcript | `not_parallel` |
+| No test run after the last edit | hand-built transcript (`test_features`) | `no_confirm_run` |
 | Stops early | hand-built transcript | `too_few_calls` |
 | Wrong answer, right call | hand-built transcript | `outcome_mismatch` |
 | Wrong path | hand-built transcript | `wrong_args` |

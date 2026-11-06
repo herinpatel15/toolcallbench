@@ -68,3 +68,21 @@ what it costs.
 - **Decision:** Server errors are stored as `status=error` and excluded from pass rates; three in a row stop that model.
 - **Why:** A crashed server must not look like a bad model.
 - **Cost:** The report needs an Errors column.
+
+## ADR-012: Nested-argument tasks are opt-in
+
+- **Decision:** The four `nested` tasks have `optional: true` and run only when named.
+- **Why:** The default run stays the same 20 tasks, so results from earlier versions remain comparable.
+- **Cost:** People must ask for them (`--groups nested`).
+
+## ADR-013: API keys come from an environment variable, by name
+
+- **Decision:** `--api-key-env NAME` / `api_key_env:` hold the variable's name; a value that looks like a key is rejected.
+- **Why:** Keys on the command line end up in shell history; keys in YAML end up in git.
+- **Cost:** One extra step to export the variable.
+
+## ADR-014: Fingerprint the task set
+
+- **Decision:** Each session stores `tasks_sha`; `compare` warns when it differs. Changed tasks get a new `version`.
+- **Why:** A changed task silently changes what a pass rate means (`chain-04` is version 2).
+- **Cost:** Older sessions have no fingerprint and compare without the check.

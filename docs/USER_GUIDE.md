@@ -60,12 +60,14 @@ The full list of options is in [CLI_REFERENCE.md](CLI_REFERENCE.md).
 | Command | Purpose |
 | --- | --- |
 | `init [DIR] [--with-tasks]` | Create example configs (and optionally editable tasks) |
-| `list-tasks [--markdown]` | Show the 20 tasks |
+| `list-tasks [--markdown]` | Show the 24 tasks (20 core, 4 optional) |
 | `validate-tasks [--tasks ids] [--groups names]` | Replay reference solutions |
 | `doctor [--config FILE] [--model NAME] [--probe] [--backend K] [--host URL]` | Check setup; probe a model |
 | `run` | Run the benchmark; key options below |
 | `report [--session ID] [--print]` | Rebuild a report from stored results |
 | `sessions` | List stored sessions |
+| `compare [A] [B]` | Compare two sessions (default: previous vs latest) |
+| `export [--format json\|csv]` | Write a session's runs to a file |
 
 Key `run` options: `--config FILE`, `--backend ollama|openai-compat|scripted`, `--host URL`,
 `--model NAME` (repeat for several), `--think on|off`, `--num-ctx N`, `--temperature X`,
@@ -74,12 +76,48 @@ Key `run` options: `--config FILE`, `--backend ollama|openai-compat|scripted`, `
 
 ## Reading the report
 
-- **Settings** table: compare two reports only if these match.
+- **Settings** table: compare two reports only if these match (`compare` checks this for you).
+- **95% range** next to each pass rate: how far it could move on a rerun. If two models' ranges overlap, the run cannot tell them apart; use more `--repeats`.
+- **Run-to-run consistency** (with repeats above 1): tasks that always passed, sometimes passed, never passed.
 - **Summary**: pass rate overall and per group, median tokens per second, median seconds per task, and calls versus the reference (1.00 is ideal; 2.00 means twice as many calls).
 - **Errors**: runs where the server failed. They are not in the pass rate.
 - **Why runs failed**: right after the summary. Failures are grouped into wrong tool, bad arguments, no real call, over budget and wrong result, then listed by exact type. Each group needs a different fix, so read it together with the pass rate.
 - **Failure types**: the exact types. A model with many `invalid_json` failures has a formatting problem; many `no_call` means it answers from memory instead of using tools; many `outcome_mismatch` means it calls tools but reaches wrong results.
 - **Per-task results**: cells are passed/scored. With 3 repeats, `1/3` is a flaky task, not a hard failure.
+
+## Compare two runs
+
+```bash
+toolcallbench compare                 # previous session vs latest
+toolcallbench compare run-a run-b     # any two
+```
+
+It lists the settings that differ first, then the pass-rate change with a verdict, tasks that flipped and failure-family changes. Change one thing between the two runs (context length, quantization, temperature) to learn what that thing does.
+
+## Nested-argument tasks and ablations
+
+```bash
+toolcallbench run --model qwen3:8b --groups nested                 # 4 tasks with list-of-object arguments
+toolcallbench run --model qwen3:8b --groups nested --max-calls-per-turn 1
+toolcallbench run --model qwen3:8b --tools-offered task
+```
+
+`--max-calls-per-turn 1` tests whether a small model does better one call at a time. `--tools-offered task` shows how much a smaller menu of tools helps; it also gives hints, so do not mix it with normal results.
+
+## Hosted OpenAI-compatible APIs
+
+```bash
+export OPENAI_API_KEY=...             # the key stays in your shell
+toolcallbench run --backend openai-compat --host https://api.example.com --model some-model --api-key-env OPENAI_API_KEY
+```
+
+Prompts and file contents are sent to that provider. See `SECURITY.md`.
+
+## Export
+
+```bash
+toolcallbench export --session latest --format csv      # results/exports/<session>.csv
+```
 
 ## Compare quantization levels
 

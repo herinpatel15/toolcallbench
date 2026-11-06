@@ -8,11 +8,12 @@ from typing import Any
 
 from .checks import FAILURE_TYPES
 from .models import GROUPS
+from .stats import format_range, ranges_overlap, wilson_interval
 from .store import Store
 
 # Groups of failure types, by what to fix. Every type in checks.FAILURE_TYPES belongs to exactly one group.
 FAILURE_FAMILIES = {
-    "Wrong tool": ["unknown_tool", "wrong_tool", "too_few_calls", "unneeded_call", "not_parallel"],
+    "Wrong tool or step": ["unknown_tool", "wrong_tool", "too_few_calls", "no_confirm_run", "unneeded_call", "not_parallel"],
     "Bad arguments": ["invalid_json", "invalid_args", "wrong_args"],
     "No real call": ["no_call", "text_tool_call"],
     "Over budget": ["call_limit"],
@@ -27,11 +28,14 @@ SETTING_LABELS = [
     ("temperature", "Temperature"),
     ("seed", "Base seed (+1 per repeat)"),
     ("repeats", "Repeats per task"),
+    ("tools_offered", "Tools offered"),
+    ("max_calls_per_turn", "Calls run per reply (0 = all)"),
     ("max_calls", "Call limit per run"),
     ("max_turns", "Turn limit per run"),
     ("declared_kv_cache_type", "KV cache type (declared)"),
     ("declared_flash_attention", "Flash attention (declared)"),
     ("system_prompt_sha", "System prompt hash"),
+    ("tasks_sha", "Task set hash"),
     ("toolcallbench_version", "ToolCallBench version"),
     ("platform", "Platform"),
     ("python", "Python"),
@@ -72,6 +76,7 @@ def aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
                 "errors": len(rows) - len(scored),
                 "passed": passed,
                 "scored": len(scored),
+                "range": wilson_interval(passed, len(scored)),
                 "groups": groups,
                 "failures": failures,
                 "tasks": tasks,
@@ -96,6 +101,39 @@ def _table(header: list[str], rows: list[list[str]]) -> list[str]:
 
 def _fmt(value: float | None, digits: int = 1) -> str:
     return "-" if value is None else f"{value:.{digits}f}"
+
+
+def _noise_notes(models: list[dict[str, Any]], repeats: Any) -> list[str]:
+    """Plain-language notes on how far the pass rates can be trusted."""
+    ranked = [m for m in models if m["scored"]]
+    ranked.sort(key=lambda m: -m["passed"] / m["scored"])
+    lines = [
+        "",
+        "The 95% range is how much a pass rate could move if the same test were run again. "
+        "Models whose ranges overlap cannot be told apart from this run.",
+    ]
+    for i, first in enumerate(ranked):
+        for second in ranked[i + 1 :]:
+            if ranges_overlap(first["range"], second["range"]):
+                lines.append(f"- {first['model']} and {second['model']}: no clear difference (ranges overlap).")
+    if isinstance(repeats, int) and repeats < 3:
+        lines.append(f"- Only {repeats} repeat(s) per task. Use --repeats 3 or more for steadier numbers.")
+    return lines
+
+
+def _consistency(models: list[dict[str, Any]]) -> list[str]:
+    """With repeats: for each model, how many tasks always passed, always failed, or flipped between repeats."""
+    if not any(total > 1 for m in models for _, total in m["tasks"].values()):
+        return []
+    rows = []
+    for m in models:
+        always = sum(1 for p, t in m["tasks"].values() if t and p == t)
+        never = sum(1 for p, t in m["tasks"].values() if t and p == 0)
+        mixed = sum(1 for p, t in m["tasks"].values() if t and 0 < p < t)
+        rows.append([m["model"], str(always), str(mixed), str(never)])
+    return ["", "## Run-to-run consistency", "", "Tasks per model by what happened across repeats. A high 'sometimes' count means the result is noisy.", ""] + _table(
+        ["Model", "Always passed", "Sometimes", "Never passed"], rows
+    )
 
 
 def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[str, str]] | None = None) -> str:
@@ -123,15 +161,17 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
     out += _table(["Setting", "Value"], rows)
 
     out += ["", "## Summary", "", "Pass rate counts only runs where the backend answered. Errors are runs where it did not.", ""]
-    header = ["Model", "Quant", "Runs", "Errors", "Pass"] + [g.title() for g in GROUPS] + ["tok/s", "s/task", "Calls vs ref"]
+    shown = [g for g in GROUPS if any(r["grp"] == g for r in runs)]
+    header = ["Model", "Quant", "Runs", "Errors", "Pass", "95% range"] + [g.title() for g in shown] + ["tok/s", "s/task", "Calls vs ref"]
     rows = []
     for m in sorted(models, key=lambda x: -(x["passed"] / x["scored"] if x["scored"] else -1)):
         rows.append(
-            [m["model"], m["quant"] or "-", str(m["runs"]), str(m["errors"]), _pct(m["passed"], m["scored"])]
-            + [_pct(*m["groups"][g]) for g in GROUPS]
+            [m["model"], m["quant"] or "-", str(m["runs"]), str(m["errors"]), _pct(m["passed"], m["scored"]), format_range(m["passed"], m["scored"])]
+            + [_pct(*m["groups"][g]) for g in shown]
             + [_fmt(m["tok_per_s"]), _fmt(m["seconds"]), _fmt(m["efficiency"], 2)]
         )
     out += _table(header, rows)
+    out += _noise_notes(models, settings.get("repeats"))
 
     seen_types = [t for t in FAILURE_TYPES if any(t in m["failures"] for m in models)]
     out += ["", "## Why runs failed", ""]
@@ -146,6 +186,8 @@ def render_markdown(store: Store, session_id: str, task_titles: dict[str, tuple[
         out += _table(["Model"] + seen_types, [[m["model"]] + [str(m["failures"].get(t, 0)) for t in seen_types] for m in models])
     else:
         out.append("No failures.")
+
+    out += _consistency(models)
 
     out += ["", "## Where the time went", "", "Medians per task. A dash means the server did not report that number.", ""]
     rows = []

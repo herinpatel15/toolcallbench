@@ -15,14 +15,14 @@ def cli(*args):
 def test_list_tasks(capsys):
     assert cli("list-tasks") == 0
     out = capsys.readouterr().out
-    assert "read-01" in out and "20 tasks" in out
+    assert "read-01" in out and "24 tasks (20 in a default run, 4 optional" in out
     assert cli("list-tasks", "--markdown") == 0
     assert "| Task |" in capsys.readouterr().out
 
 
 def test_validate_tasks(capsys):
     assert cli("validate-tasks") == 0
-    assert "20/20 reference solutions pass" in capsys.readouterr().out
+    assert "24/24 reference solutions pass" in capsys.readouterr().out
 
 
 def test_scripted_run_report_and_resume(tmp_path, capsys):
@@ -137,4 +137,4 @@ def test_init_with_tasks_gives_a_folder_that_runs(tmp_path, capsys, monkeypatch)
     assert (tmp_path / "fixtures" / "repo" / "pytest.ini").is_file()
     monkeypatch.chdir(tmp_path)
     assert cli("validate-tasks") == 0
-    assert "20/20 reference solutions pass" in capsys.readouterr().out
+    assert "24/24 reference solutions pass" in capsys.readouterr().out

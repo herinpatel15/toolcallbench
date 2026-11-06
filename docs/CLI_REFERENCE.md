@@ -9,7 +9,7 @@ Install with `pip install toolcallbench` (Python 3.10 or newer). The command is 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
-| 1 | A check failed (`doctor`, `validate-tasks`), the server was unreachable, or `init` would overwrite files |
+| 1 | A check failed (`doctor`, `validate-tasks`), the server was unreachable, `init` would overwrite files, or `compare` / `export` could not find the sessions |
 | 2 | Bad input: invalid config or task files, no task files found, or a session id that already exists without `--resume` |
 | 130 | Interrupted with Ctrl+C (use `--resume` to continue) |
 
@@ -22,6 +22,8 @@ toolcallbench doctor --probe --config configs/my-models.yaml
 toolcallbench run --config configs/my-models.yaml
 toolcallbench sessions
 toolcallbench report --session latest
+toolcallbench compare            # previous session vs latest
+toolcallbench export --format csv
 ```
 
 ## Where files go
@@ -33,6 +35,8 @@ toolcallbench report --session latest
 | Results database | `./results/results.sqlite` |
 | Raw logs | `./results/logs/` |
 | Reports | `./results/reports/<session>.md` and `.html` |
+| Comparisons | `./results/reports/compare-<A>-vs-<B>.md` |
+| Exports | `./results/exports/<session>.json` or `.csv` |
 
 "`./`" is the folder you run the command in, or `--root` / `--results-dir` if you give them.
 
@@ -46,11 +50,11 @@ without changing anything if a target folder already exists.
 
 ### `list-tasks [--markdown]`
 
-Prints the 20 tasks. `--markdown` prints a table.
+Prints all 24 tasks (20 core, 4 optional `nested`; optional ones are marked). `--markdown` prints a table.
 
 ### `validate-tasks [--tasks IDS] [--groups NAMES]`
 
-Replays each task's reference solution through the checker. `20/20 reference solutions pass`
+Replays each task's reference solution through the checker. `24/24 reference solutions pass`
 means the tasks and the sample repository are intact. Exit code 1 if any fail.
 
 ### `doctor [--config FILE] [--model NAME]... [--probe] [--backend KIND] [--host URL]`
@@ -81,7 +85,10 @@ override the config file.
 | `--max-calls N` | Tool calls allowed per task | 12 |
 | `--max-turns N` | Model turns allowed per task | 10 |
 | `--tasks IDS` | Comma-separated task ids, e.g. `read-01,edit-02` | all |
-| `--groups NAMES` | Comma-separated groups: `read,edit,run,chain,failure` | all |
+| `--groups NAMES` | Comma-separated groups: `read,edit,run,chain,failure,nested` | the 20 core tasks (naming `nested` or a nested task id adds the optional tasks) |
+| `--tools-offered all\|task` | `all` offers the core tools to every task; `task` offers only the tools the task needs (a hint, so an ablation) | `all` |
+| `--max-calls-per-turn N` | Run only the first N tool calls of each reply; 0 means no limit | 0 |
+| `--api-key-env NAME` | Name of an environment variable that holds the API key (`openai-compat` only). The key itself is never given here | none (`TOOLCALLBENCH_API_KEY` is used if set) |
 | `--session ID` | Name of this run | start time |
 | `--resume` | Continue a session and skip runs already stored | off |
 | `--kv-cache-type T` | KV cache type your server uses (recorded only) | `f16` |
@@ -91,6 +98,14 @@ override the config file.
 
 If the session id already exists and `--resume` is not given, `run` prints an error and exits
 with code 2. If the server cannot be reached it exits with code 1.
+
+### `compare [SESSION_A] [SESSION_B]`
+
+Compares two sessions. With no arguments it compares the previous session with the latest. It shows which settings differ (so you know whether the comparison is fair), the pass-rate change per model with a verdict (better, worse, or no clear difference based on the 95% ranges), tasks that flipped, and failure-family changes. It warns when the two sessions ran different task sets. Writes `results/reports/compare-A-vs-B.md`. Exit code 1 if fewer than two sessions exist or an id is unknown.
+
+### `export [--session ID|latest] [--format json|csv] [--output FILE|-]`
+
+Writes every run of a session as JSON (session settings plus runs) or CSV (one row per run: model, task, passed, failure type, tokens, timings). Default file: `results/exports/<session>.<format>`; `-` prints to the terminal.
 
 ### `report [--session ID|latest] [--print]`
 
@@ -113,6 +128,9 @@ settings:                          # all optional
   max_calls: 12
   max_turns: 10
   request_timeout: 600             # seconds per request; raise it for slow or thinking models
+  tools_offered: all               # all | task
+  max_calls_per_turn: 0            # 0 = no limit
+api_key_env: OPENAI_API_KEY        # NAME of an environment variable (openai-compat only), never the key
 declared_server:                   # recorded in the report, not enforced
   kv_cache_type: q8_0
   flash_attention: true
@@ -137,5 +155,5 @@ always wins over the same setting in the file.
 ## Failure types
 
 `invalid_json`, `invalid_args`, `unknown_tool`, `text_tool_call`, `no_call`, `unneeded_call`,
-`call_limit`, `not_parallel`, `wrong_tool`, `too_few_calls`, `patch_failed`, `wrong_args`, and
-`outcome_mismatch`. `TECH_SPEC.md` defines each one and the order they are checked in.
+`call_limit`, `not_parallel`, `wrong_tool`, `too_few_calls`, `no_confirm_run`, `patch_failed`,
+`wrong_args`, and `outcome_mismatch` (14). `TECH_SPEC.md` defines each one and the order they are checked in.

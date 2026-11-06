@@ -10,10 +10,17 @@ TASKS_DIR = DATA / "tasks"
 
 
 @pytest.fixture(scope="session")
-def tasks():
+def all_tasks():
+    """Every task, including the optional ones."""
     from toolcallbench.tasks import load_tasks
 
     return load_tasks(TASKS_DIR)
+
+
+@pytest.fixture(scope="session")
+def tasks(all_tasks):
+    """The core tasks that a default run uses."""
+    return [t for t in all_tasks if not t.optional]
 
 
 @pytest.fixture

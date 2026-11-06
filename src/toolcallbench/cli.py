@@ -1,8 +1,9 @@
-"""Command-line interface: init, list-tasks, validate-tasks, doctor, run, report, sessions."""
+"""Command-line interface: init, list-tasks, validate-tasks, doctor, run, report, sessions, compare, export."""
 from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import platform
 import re
 import shutil
@@ -13,13 +14,15 @@ from typing import Any
 
 from . import __version__
 from .backends import BACKEND_KINDS, PROFILES, BackendError, OllamaBackend, OpenAICompatBackend, ScriptedBackend, make_backend
-from .config import ConfigError, ModelSpec, RunConfig, data_dir, find_project_root, load_config
+from .compare import render_compare
+from .config import DEFAULT_API_KEY_ENV, ConfigError, ModelSpec, RunConfig, data_dir, find_project_root, load_config
+from .export import FORMATS, export_session
 from .models import Task
 from .report import markdown_to_html, render_markdown
 from .runner import SYSTEM_PROMPT, run_once
 from .store import Store, new_session_id, write_log
-from .tasks import TaskError, load_tasks, select_tasks
-from .tools import run_trusted
+from .tasks import TaskError, load_tasks, select_tasks, tasks_fingerprint
+from .tools import TOOLS_OFFERED_MODES, run_trusted
 
 DEFAULT_HOSTS = {"ollama": "http://localhost:11434", "openai-compat": "http://localhost:8080", "scripted": ""}
 
@@ -61,6 +64,12 @@ def build_config(args: argparse.Namespace) -> RunConfig:
         cfg.declared_flash_attention = True
     if args.profile:
         cfg.profile = args.profile
+    if args.tools_offered:
+        cfg.tools_offered = args.tools_offered
+    if args.max_calls_per_turn is not None:
+        cfg.max_calls_per_turn = args.max_calls_per_turn
+    if args.api_key_env:
+        cfg.api_key_env = args.api_key_env
     if args.model:
         cfg.models = [ModelSpec(name=m) for m in args.model]
     if args.think != "default":
@@ -73,7 +82,23 @@ def build_config(args: argparse.Namespace) -> RunConfig:
         raise ConfigError("no models given: use --model NAME (repeatable) or --config FILE")
     if cfg.repeats < 1 or cfg.max_calls < 1 or cfg.max_turns < 1:
         raise ConfigError("repeats, max_calls and max_turns must be at least 1")
+    if cfg.max_calls_per_turn < 0:
+        raise ConfigError("max_calls_per_turn must be 0 or more")
+    cfg.api_key_env, cfg.api_key = resolve_api_key(cfg.backend, cfg.api_key_env)
     return cfg
+
+
+def resolve_api_key(backend: str, env_name: str) -> tuple[str, str]:
+    """Read the API key from an environment variable. The key itself is never accepted on the command line or in YAML."""
+    if backend != "openai-compat":
+        if env_name:
+            raise ConfigError("an API key is only used with --backend openai-compat")
+        return "", ""
+    name = env_name or DEFAULT_API_KEY_ENV
+    key = os.environ.get(name, "")
+    if env_name and not key:
+        raise ConfigError(f"environment variable {env_name} is not set (it should hold your API key)")
+    return (name if key else ""), key
 
 
 def _session_settings(cfg: RunConfig, tasks: list[Task]) -> dict[str, Any]:
@@ -89,6 +114,10 @@ def _session_settings(cfg: RunConfig, tasks: list[Task]) -> dict[str, Any]:
         "declared_kv_cache_type": cfg.declared_kv_cache_type,
         "declared_flash_attention": cfg.declared_flash_attention,
         "think": {m.name: m.think for m in cfg.models},
+        "tools_offered": cfg.tools_offered,
+        "max_calls_per_turn": cfg.max_calls_per_turn,
+        "api_key_env": cfg.api_key_env or "none",
+        "tasks_sha": tasks_fingerprint(tasks),
         "system_prompt_sha": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()[:12],
         "toolcallbench_version": __version__,
         "python": platform.python_version(),
@@ -115,14 +144,16 @@ def cmd_list_tasks(args: argparse.Namespace) -> int:
     _, tasks_dir, _, _ = _paths(args)
     tasks = load_tasks(tasks_dir)
     if args.markdown:
-        print("| Task | Group | Title | Tool named in prompt | Reference calls |")
-        print("| --- | --- | --- | --- | --- |")
+        print("| Task | Group | Title | Tool named in prompt | Reference calls | In default run |")
+        print("| --- | --- | --- | --- | --- | --- |")
         for t in tasks:
-            print(f"| {t.id} | {t.group} | {t.title} | {'yes' if t.tools_named else 'no'} | {t.baseline_calls} |")
+            print(f"| {t.id} | {t.group} | {t.title} | {'yes' if t.tools_named else 'no'} | {t.baseline_calls} | {'no (optional)' if t.optional else 'yes'} |")
     else:
         for t in tasks:
-            print(f"{t.id:<12} {t.group:<8} calls={t.baseline_calls}  {t.title}")
-        print(f"\n{len(tasks)} tasks")
+            mark = "  [optional]" if t.optional else ""
+            print(f"{t.id:<12} {t.group:<8} calls={t.baseline_calls}  {t.title}{mark}")
+        core = sum(1 for t in tasks if not t.optional)
+        print(f"\n{len(tasks)} tasks ({core} in a default run, {len(tasks) - core} optional: select them with --groups or --tasks)")
     return 0
 
 
@@ -149,7 +180,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_validate_tasks(args: argparse.Namespace) -> int:
     _, tasks_dir, fixture, _ = _paths(args)
-    tasks = select_tasks(load_tasks(tasks_dir), _split(args.tasks), _split(args.groups))
+    tasks = select_tasks(load_tasks(tasks_dir), _split(args.tasks), _split(args.groups), include_optional=True)
     backend = ScriptedBackend(tasks, "oracle")
     failed = 0
     for task in tasks:
@@ -223,11 +254,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 _line(True, f"model {name}", f"{info.get('parameter_size', '?')} {info.get('quant', '?')}; {note}")
                 probe_backends.append(backend)
         else:
-            OpenAICompatBackend("probe", base_url=host, timeout=10).check()
-            all_ok &= _line(True, "OpenAI-compatible server", f"reachable at {host}")
+            key_name, key = resolve_api_key("openai-compat", args.api_key_env or cfg.api_key_env)
+            OpenAICompatBackend("probe", base_url=host, timeout=10, api_key=key).check()
+            all_ok &= _line(True, "OpenAI-compatible server", f"reachable at {host}" + (f" (API key from {key_name})" if key else ""))
             if args.probe:
                 for name in args.model or []:
-                    probe_backends.append(OpenAICompatBackend(name, base_url=host, timeout=120))
+                    probe_backends.append(OpenAICompatBackend(name, base_url=host, timeout=120, api_key=key))
     except BackendError as exc:
         all_ok &= _line(False, "model server", f"{exc}" + ("; start it with: ollama serve" if kind == "ollama" else ""))
     if args.probe and probe_backends and tasks:
@@ -273,6 +305,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             timeout=cfg.request_timeout,
             tasks=tasks,
             profile=cfg.profile,
+            api_key=cfg.api_key,
         )
         try:
             backend.check()
@@ -295,7 +328,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                     continue
                 if hasattr(backend, "options"):
                     backend.options = cfg.options_for(repeat)
-                record = run_once(task, backend, fixture, max_calls=cfg.max_calls, max_turns=cfg.max_turns)
+                record = run_once(
+                    task,
+                    backend,
+                    fixture,
+                    max_calls=cfg.max_calls,
+                    max_turns=cfg.max_turns,
+                    tools_offered=cfg.tools_offered,
+                    max_calls_per_turn=cfg.max_calls_per_turn,
+                )
                 log_path = write_log(results_dir, session_id, spec.name, repeat, record)
                 store.add_run(session_id, model=spec.name, quant=quant, backend=cfg.backend, repeat=repeat, record=record, log_path=log_path)
                 if record.status == "error":
@@ -353,6 +394,71 @@ def cmd_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _open_store(args: argparse.Namespace) -> tuple[Store | None, Path]:
+    _, _, _, results_dir = _paths(args)
+    db = results_dir / "results.sqlite"
+    if not db.exists():
+        print(f"no results database at {db}; run a benchmark first", file=sys.stderr)
+        return None, results_dir
+    return Store(db), results_dir
+
+
+def _resolve_session(store: Store, name: str | None, offset: int = 0) -> str | None:
+    """'latest' is the newest session, 'previous' the one before it; anything else is a session id."""
+    sessions = [s["session_id"] for s in store.list_sessions()]
+    if name in (None, "latest"):
+        return sessions[offset] if len(sessions) > offset else None
+    if name == "previous":
+        return sessions[1] if len(sessions) > 1 else None
+    return name if store.session_exists(name) else None
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    store, results_dir = _open_store(args)
+    if store is None:
+        return 1
+    id_b = _resolve_session(store, args.second or "latest")
+    id_a = _resolve_session(store, args.first or "previous")
+    if id_a is None or id_b is None:
+        print("need two sessions to compare; see: toolcallbench sessions", file=sys.stderr)
+        store.close()
+        return 1
+    if id_a == id_b:
+        print("both names point at the same session", file=sys.stderr)
+        store.close()
+        return 1
+    markdown = render_compare(store, id_a, id_b)
+    out_dir = results_dir / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"compare-{id_a}-vs-{id_b}.md"
+    path.write_text(markdown, encoding="utf-8")
+    print(markdown)
+    print(f"saved: {path}")
+    store.close()
+    return 0
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    store, results_dir = _open_store(args)
+    if store is None:
+        return 1
+    session_id = _resolve_session(store, args.session)
+    if session_id is None:
+        print(f"no such session: {args.session}", file=sys.stderr)
+        store.close()
+        return 1
+    text = export_session(store, session_id, args.format)
+    if args.output == "-":
+        sys.stdout.write(text)
+    else:
+        path = Path(args.output) if args.output else results_dir / "exports" / f"{session_id}.{args.format}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        print(f"exported {session_id} to {path}")
+    store.close()
+    return 0
+
+
 # ------------------------------------------------------------------------ parser
 
 
@@ -386,6 +492,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--host")
     p.add_argument("--model", action="append", help="model to check (repeatable)")
     p.add_argument("--config", help="YAML config file; the probe then uses its settings (num_ctx, temperature, think, timeout)")
+    p.add_argument("--api-key-env", dest="api_key_env", help="NAME of the environment variable holding an API key (openai-compat backend only)")
     p.add_argument("--probe", action="store_true", help="run one real task against each model")
     p.set_defaults(func=cmd_doctor)
 
@@ -401,6 +508,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repeats", type=int)
     p.add_argument("--max-calls", type=int, dest="max_calls")
     p.add_argument("--max-turns", type=int, dest="max_turns")
+    p.add_argument("--tools-offered", choices=TOOLS_OFFERED_MODES, dest="tools_offered", help="all (default): every tool; task: only the tools the task's reference solution uses (an ablation)")
+    p.add_argument("--max-calls-per-turn", type=int, dest="max_calls_per_turn", help="run only this many calls from each model reply (default 0: run all of them)")
+    p.add_argument("--api-key-env", dest="api_key_env", help="NAME of the environment variable holding an API key (openai-compat backend only). The key itself is never taken as an argument")
     p.add_argument("--kv-cache-type", dest="kv_cache_type", help="KV cache type your server was started with (recorded only)")
     p.add_argument("--flash-attention", action="store_true", help="record that the server runs with flash attention")
     p.add_argument("--profile", choices=PROFILES, help="behaviour of the scripted backend")
@@ -417,6 +527,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("sessions", parents=[common], help="list stored sessions")
     p.set_defaults(func=cmd_sessions)
+
+    p = sub.add_parser("compare", parents=[common], help="compare two sessions: pass rates, changed tasks, failure families")
+    p.add_argument("first", nargs="?", help="session id, or 'previous' (default)")
+    p.add_argument("second", nargs="?", help="session id, or 'latest' (default)")
+    p.set_defaults(func=cmd_compare)
+
+    p = sub.add_parser("export", parents=[common], help="write a session's runs as JSON or CSV")
+    p.add_argument("--session", help="session id or 'latest' (default)")
+    p.add_argument("--format", choices=FORMATS, default="json")
+    p.add_argument("--output", help="file to write; '-' prints to the terminal (default: results/exports/<session>.<format>)")
+    p.set_defaults(func=cmd_export)
     return parser
 
 

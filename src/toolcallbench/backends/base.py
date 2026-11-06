@@ -27,9 +27,11 @@ class Backend:
         return {"backend": self.name}
 
 
-def request_json(method: str, url: str, payload: dict[str, Any] | None, timeout: float) -> Any:
+def request_json(
+    method: str, url: str, payload: dict[str, Any] | None, timeout: float, headers: dict[str, str] | None = None
+) -> Any:
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    request = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    request = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json", **(headers or {})})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
